@@ -56,9 +56,9 @@ function dateUTC(daySinceEpoch) {
 // ─── Tier classification (by 180d volume) ──────────────────────────────────
 const TIERS = {
   whale:  { min: 5_000_000, ico: "🐋", label: "Whale" },
-  big:    { min:   500_000, ico: "🐬", label: "Großer Fisch" },
-  fish:   { min:    50_000, ico: "🐟", label: "Fisch" },
-  perch:  { min:     5_000, ico: "🐠", label: "Barsch" },
+  big:    { min:   500_000, ico: "🐬", label: "Big Fish" },
+  fish:   { min:    50_000, ico: "🐟", label: "Fish" },
+  perch:  { min:     5_000, ico: "🐠", label: "Perch" },
   shrimp: { min:         0, ico: "🦐", label: "Shrimp" },
 };
 const TIER_ORDER = ["whale", "big", "fish", "perch", "shrimp"];
@@ -73,7 +73,7 @@ function buildTierBadge(volume) {
   const el = document.createElement("span");
   el.className = "tier-badge";
   el.dataset.tier = tier;
-  el.title = `${t.label} — Volume ≥ ${fmtMoney(t.min)}`;
+  el.title = `${t.label} — volume ≥ ${fmtMoney(t.min)}`;
   const ico = document.createElement("span"); ico.className = "ico"; ico.textContent = t.ico;
   const lbl = document.createElement("span"); lbl.textContent = t.label;
   el.append(ico, lbl);
@@ -86,19 +86,19 @@ function buildNameIcons(row) {
   wrap.className = "name-icons";
   const trades = row.trades || 0;
   if (trades >= 500) {
-    const e = document.createElement("span"); e.className = "ico hot"; e.title = `Sehr aktiv: ${trades} Trades`; e.textContent = "🔥";
+    const e = document.createElement("span"); e.className = "ico hot"; e.title = `Very active: ${trades} trades`; e.textContent = "🔥";
     wrap.append(e);
   } else if (trades >= 200) {
-    const e = document.createElement("span"); e.className = "ico"; e.title = `${trades} Trades`; e.textContent = "⚡";
+    const e = document.createElement("span"); e.className = "ico"; e.title = `${trades} trades`; e.textContent = "⚡";
     wrap.append(e);
   }
   if ((row.pnl || 0) <= -500_000) {
-    const e = document.createElement("span"); e.className = "ico skull"; e.title = "Großer Verlust"; e.textContent = "💀";
+    const e = document.createElement("span"); e.className = "ico skull"; e.title = "Heavy losses"; e.textContent = "💀";
     wrap.append(e);
   }
   const decided = (row.wins || 0) + (row.losses || 0);
   if (decided >= 10 && row.wins === decided) {
-    const e = document.createElement("span"); e.className = "ico star"; e.title = "Ungeschlagen auf resolved Markets"; e.textContent = "⭐";
+    const e = document.createElement("span"); e.className = "ico star"; e.title = "Undefeated on resolved markets"; e.textContent = "⭐";
     wrap.append(e);
   }
   return wrap;
@@ -138,17 +138,17 @@ function renderStats(filtered, total) {
     .join("  ·  ");
 
   const stats = [
-    { label: "Players", value: String(filtered.length), sub: total !== filtered.length ? `von ${total}` : null },
+    { label: "Players", value: String(filtered.length), sub: total !== filtered.length ? `of ${total}` : null },
     { label: "Σ Volume 180d", value: fmtMoney(filtered.reduce((s, r) => s + (r.volume || 0), 0)) },
     { label: "Σ P&L 180d", valueRaw: filtered.reduce((s, r) => s + (r.pnl || 0), 0), signed: true },
     {
-      label: state.order === "loss" ? "Größter Loss" : "Größter Win",
+      label: state.order === "loss" ? "Biggest loss" : "Biggest win",
       valueRaw: state.order === "loss"
         ? Math.min(...filtered.map((r) => r.pnl || 0))
         : Math.max(...filtered.map((r) => r.pnl || 0)),
       signed: true,
     },
-    { label: "Tier-Verteilung", value: tierLine || "—" },
+    { label: "Tier breakdown", value: tierLine || "—" },
   ];
 
   const frag = document.createDocumentFragment();
@@ -161,7 +161,7 @@ function renderStats(filtered, total) {
       if (s.signed) v.classList.add(s.valueRaw >= 0 ? "pos" : "neg");
     } else {
       v.textContent = s.value;
-      if (s.label === "Tier-Verteilung") v.style.fontSize = "16px";
+      if (s.label === "Tier breakdown") v.style.fontSize = "16px";
     }
     if (s.sub) {
       const sub = document.createElement("div"); sub.className = "stat-sub"; sub.textContent = s.sub;
@@ -197,11 +197,11 @@ function renderPlayers() {
   $playersBody.replaceChildren();
   if (!filtered.length) {
     $playersStatus.textContent = state.rows.length
-      ? "Keine Player passen zum Filter."
-      : `Noch keine Player-Daten für ${state.tag.toUpperCase()} — Scan läuft im Hintergrund.`;
+      ? "No players match this filter."
+      : `No player data yet for ${state.tag.toUpperCase()} — scan running in the background.`;
     return;
   }
-  $playersStatus.textContent = `${filtered.length} Player`;
+  $playersStatus.textContent = `${filtered.length} players`;
 
   const frag = document.createDocumentFragment();
   filtered.forEach((r, i) => {
@@ -282,7 +282,7 @@ function buildExpandRow(rowData) {
   td.colSpan = document.querySelectorAll("#players-table thead th").length || 13;
   const inner = document.createElement("div");
   inner.className = "expand-inner loading";
-  inner.textContent = "Lade Detail-Daten…";
+  inner.textContent = "Loading details…";
   td.append(inner);
   exp.append(td);
   fetchAndRenderDetail(rowData, inner);
@@ -301,7 +301,7 @@ async function fetchAndRenderDetail(rowData, host) {
     renderDetail(rowData, detail, host);
   } catch (err) {
     host.classList.remove("loading");
-    host.textContent = "Fehler: " + err.message;
+    host.textContent = "Error: " + err.message;
   }
 }
 
@@ -322,13 +322,13 @@ function renderDetail(rowData, detail, host) {
 
   const wrap = document.createElement("div"); wrap.className = "spark-wrap";
   const title = document.createElement("h4");
-  title.textContent = `Daily P&L · ${state.tag.toUpperCase()} · letzte 180 Tage`;
+  title.textContent = `Daily P&L · ${state.tag.toUpperCase()} · last 180 days`;
   wrap.append(title);
   wrap.append(renderSpark(series));
   // top markets table below sparkline
   const tm = (detail.top_markets || []).filter((m) => m.tag_slug === state.tag).slice(0, 5);
   if (tm.length) {
-    const h = document.createElement("h4"); h.textContent = "Top-Markets (P&L)";
+    const h = document.createElement("h4"); h.textContent = "Top markets (P&L)";
     h.style.marginTop = "14px";
     wrap.append(h);
     wrap.append(renderTopMarketsTable(tm));
@@ -339,23 +339,23 @@ function renderDetail(rowData, detail, host) {
   const tag = (detail.by_tag || []).find((t) => t.tag_slug === state.tag) || {};
   const side = document.createElement("div"); side.className = "expand-side";
   const items = [
-    ["Markets gespielt",  tag.markets_played != null ? tag.markets_played : "—"],
+    ["Markets played",    tag.markets_played != null ? tag.markets_played : "—"],
     ["Trades",            tag.trades != null ? tag.trades : "—"],
-    ["Trades / Markt",    tag.trades_per_market != null ? tag.trades_per_market.toFixed(1) : "—"],
+    ["Trades / market",   tag.trades_per_market != null ? tag.trades_per_market.toFixed(1) : "—"],
     ["Volume",            fmtMoney(tag.volume)],
-    ["Avg Trade Size",    fmtMoney(tag.avg_trade_size)],
-    ["Avg Position",      fmtMoney(tag.avg_position_size)],
-    ["Größter Trade",     fmtMoney(tag.largest_trade)],
+    ["Avg trade size",    fmtMoney(tag.avg_trade_size)],
+    ["Avg position",      fmtMoney(tag.avg_position_size)],
+    ["Largest trade",     fmtMoney(tag.largest_trade)],
     ["", null],
     ["Wins",              String(tag.wins ?? 0)],
     ["Losses",            String(tag.losses ?? 0)],
-    ["Win-Rate",          pctOrDash(tag.win_rate)],
+    ["Win rate",          pctOrDash(tag.win_rate)],
     ["Edge / $",          pctOrDash(tag.edge_per_dollar)],
     ["", null],
-    ["Bester Markt P&L",  fmtMoney(tag.biggest_market_win)],
-    ["Schlimmster Markt", fmtMoney(tag.biggest_market_loss)],
-    ["Open Positions",    String(tag.open_positions ?? 0)],
-    ["All-time Profit",   fmtMoney(detail.user?.lb_amount)],
+    ["Best market P&L",   fmtMoney(tag.biggest_market_win)],
+    ["Worst market",      fmtMoney(tag.biggest_market_loss)],
+    ["Open positions",    String(tag.open_positions ?? 0)],
+    ["All-time profit",   fmtMoney(detail.user?.lb_amount)],
   ];
   for (const [k, v] of items) {
     if (k === "" && v == null) {
@@ -374,7 +374,7 @@ function renderDetail(rowData, detail, host) {
   link.className = "open-profile";
   link.target = "_blank"; link.rel = "noopener";
   link.href = "https://polymarket.com/profile/" + rowData.address;
-  link.textContent = "Auf Polymarket öffnen ↗";
+  link.textContent = "Open on Polymarket ↗";
   side.append(link);
   host.append(side);
 }
@@ -385,11 +385,11 @@ function renderTopMarketsTable(markets) {
   t.style.cssText = "border:1px solid var(--border); border-radius:10px; overflow:hidden;";
   const thead = document.createElement("thead");
   thead.innerHTML = `<tr>
-    <th>Markt</th>
+    <th>Market</th>
     <th class="num">P&L</th>
     <th class="num">Vol</th>
     <th class="num">Trades</th>
-    <th class="num">Größt.</th>
+    <th class="num">Largest</th>
   </tr>`;
   t.append(thead);
   const tbody = document.createElement("tbody");
@@ -469,7 +469,7 @@ function togglePlayerRow(addr) {
 // ─── Data load ─────────────────────────────────────────────────────────────
 async function load() {
   renderSkeleton();
-  $playersStatus.textContent = "Lade Players…";
+  $playersStatus.textContent = "Loading players…";
   $playersStats.replaceChildren();
   try {
     const u = new URL("/api/leaderboard", location.origin);
@@ -489,7 +489,7 @@ async function load() {
     $playersStatus.innerHTML = "";
     const box = document.createElement("div");
     box.className = "error";
-    box.textContent = "Konnte Leaderboard nicht laden: " + err.message;
+    box.textContent = "Could not load leaderboard: " + err.message;
     $playersStatus.append(box);
   }
 }

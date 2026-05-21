@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -18,30 +18,30 @@
       <button class="seg-btn" data-tag="tennis">Tennis</button>
     </div>
     <div class="seg" role="tablist" aria-label="Order">
-      <button class="seg-btn active" data-order="loss">Verlierer</button>
-      <button class="seg-btn" data-order="profit">Gewinner</button>
+      <button class="seg-btn active" data-order="loss">Losers</button>
+      <button class="seg-btn" data-order="profit">Winners</button>
     </div>
     <label class="minfilter">
-      <span>Min. Trades</span>
+      <span>Min. trades</span>
       <input id="minTrades" type="number" min="0" value="0" step="10" />
     </label>
-    <button id="refresh" type="button" title="Neu laden" aria-label="Neu laden">↻</button>
+    <button id="refresh" type="button" title="Reload" aria-label="Reload">↻</button>
   </div>
 </header>
 
 <main>
   <section id="players-stats" class="stats-banner" aria-live="polite"></section>
 
-  <section class="tier-filter" id="tier-filter" aria-label="Tier-Filter">
-    <button class="chip active" data-tier="all">Alle</button>
+  <section class="tier-filter" id="tier-filter" aria-label="Tier filter">
+    <button class="chip active" data-tier="all">All</button>
     <button class="chip" data-tier="whale">🐋 Whales</button>
-    <button class="chip" data-tier="big">🐬 Großfische</button>
-    <button class="chip" data-tier="fish">🐟 Fische</button>
-    <button class="chip" data-tier="perch">🐠 Barsche</button>
+    <button class="chip" data-tier="big">🐬 Big fish</button>
+    <button class="chip" data-tier="fish">🐟 Fish</button>
+    <button class="chip" data-tier="perch">🐠 Perch</button>
     <button class="chip" data-tier="shrimp">🦐 Shrimps</button>
   </section>
 
-  <section id="players-status" class="status" aria-live="polite">Lade Players…</section>
+  <section id="players-status" class="status" aria-live="polite">Loading players…</section>
 
   <div class="table-wrap">
     <table class="players-table" id="players-table">
@@ -54,12 +54,12 @@
           <th class="num sortable hide-sm" data-sort="unrealized_pnl">Unrealized <span class="arr"></span></th>
           <th class="num sortable" data-sort="total_pnl">Total <span class="arr"></span></th>
           <th class="num sortable hide-sm" data-sort="volume">Volume <span class="arr"></span></th>
-          <th class="num sortable hide-md" data-sort="markets_played" title="Anzahl einzigartiger Markets">Markets <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="markets_played" title="Number of unique markets traded">Markets <span class="arr"></span></th>
           <th class="num sortable hide-md" data-sort="trades">Trades <span class="arr"></span></th>
-          <th class="num sortable hide-md" data-sort="avg_trade_size" title="Volume / Trades">Avg Trade <span class="arr"></span></th>
-          <th class="num sortable hide-md" data-sort="largest_trade" title="Größter einzelner Trade">Größt. <span class="arr"></span></th>
-          <th class="num sortable hide-md" data-sort="win_rate">Win-Rate <span class="arr"></span></th>
-          <th class="num sortable hide-md" data-sort="edge_per_dollar" title="Edge per Dollar — Skill-Metrik auf resolved Markets">Edge/$ <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="avg_trade_size" title="Volume / trades">Avg trade <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="largest_trade" title="Largest single trade">Largest <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="win_rate">Win rate <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="edge_per_dollar" title="Edge per dollar — skill metric on resolved markets">Edge/$ <span class="arr"></span></th>
         </tr>
       </thead>
       <tbody id="players-body"></tbody>
@@ -68,7 +68,7 @@
 </main>
 
 <footer>
-  <p>Daten via <a href="https://gamma-api.polymarket.com" target="_blank" rel="noopener">Polymarket Gamma API</a> &amp; data-api. Keine Anlageberatung.</p>
+  <p>Data via <a href="https://gamma-api.polymarket.com" target="_blank" rel="noopener">Polymarket Gamma API</a> &amp; data-api. Not financial advice.</p>
 </footer>
 
 <template id="stats-tpl">
