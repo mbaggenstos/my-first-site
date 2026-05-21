@@ -253,7 +253,10 @@ function renderPlayers() {
     tr.append(tdNum(r.unrealized_pnl, { signed: true, hide: "hide-sm" }));
     tr.append(tdNum(r.total_pnl, { signed: true }));
     tr.append(tdNum(r.volume, { hide: "hide-sm" }));
+    const markets = td("num hide-md"); markets.textContent = r.markets_played || 0; tr.append(markets);
     const trades = td("num hide-md"); trades.textContent = r.trades || 0; tr.append(trades);
+    tr.append(tdNum(r.avg_trade_size, { hide: "hide-md" }));
+    tr.append(tdNum(r.largest_trade, { hide: "hide-md" }));
     tr.append(tdNum(r.win_rate, { fmt: "pct", hide: "hide-md" }));
     const edge = tdNum(r.edge_per_dollar, { fmt: "pct", hide: "hide-md" });
     if (r.edge_per_dollar != null && !isNaN(r.edge_per_dollar)) {
@@ -276,7 +279,7 @@ function buildExpandRow(rowData) {
   const exp = document.createElement("tr");
   exp.className = "expand-row";
   const td = document.createElement("td");
-  td.colSpan = document.querySelectorAll("#players-table thead th").length;
+  td.colSpan = document.querySelectorAll("#players-table thead th").length || 13;
   const inner = document.createElement("div");
   inner.className = "expand-inner loading";
   inner.textContent = "Lade Detail-Daten…";
