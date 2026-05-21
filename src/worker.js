@@ -398,49 +398,57 @@ async function runScheduled(env, ctx) {
   const results = [];
   // alternate scopes round-robin so tennis doesn't starve behind UFC's queue
   const scopes = (env.DEFAULT_TAGS || "ufc,tennis").split(",").map((s) => `tag:${s.trim()}`);
+
+  // recover any markets stuck in 'syncing' for > 5 min (crashed worker)
+  await env.DB.prepare(`
+    UPDATE discovery_queue
+       SET status='pending'
+     WHERE status='syncing' AND COALESCE(last_run_at, 0) < ?
+  `).bind(now - 300).run();
+
   for (let i = 0; i < maxMarkets; i++) {
     const scope = scopes[i % scopes.length];
-    const pick = await env.DB.prepare(`
-      SELECT scope, market_id, event_slug, offset, oldest_ts,
-             winning_outcome, resolved
-        FROM discovery_queue
-       WHERE status = 'pending' AND scope = ?
-       ORDER BY
-         CASE WHEN offset > 0 THEN 0 ELSE 1 END,
-         resolved DESC,
-         added_at ASC
-       LIMIT 1
-    `).bind(scope).first();
+    // ATOMIC CLAIM: pick + mark syncing in one statement so two concurrent
+    // cron/admin invocations can't grab the same market and double-aggregate.
+    let pick = await env.DB.prepare(`
+      UPDATE discovery_queue
+         SET status='syncing', last_run_at=?
+       WHERE rowid = (
+         SELECT rowid FROM discovery_queue
+          WHERE status='pending' AND scope=?
+          ORDER BY
+            CASE WHEN offset > 0 THEN 0 ELSE 1 END,
+            resolved DESC,
+            added_at ASC
+          LIMIT 1
+       )
+      RETURNING scope, market_id, event_slug, offset, oldest_ts,
+                winning_outcome, resolved
+    `).bind(now, scope).first();
     if (!pick) {
-      // this scope is exhausted; try once more without scope filter (final drain)
-      const fallback = await env.DB.prepare(`
-        SELECT scope, market_id, event_slug, offset, oldest_ts,
-               winning_outcome, resolved
-          FROM discovery_queue
-         WHERE status = 'pending'
-         ORDER BY
-           CASE WHEN offset > 0 THEN 0 ELSE 1 END,
-           resolved DESC,
-           added_at ASC
-         LIMIT 1
-      `).first();
-      if (!fallback) break;
-      try {
-        const r = await scanMarketTradePage(env, fallback, windowStart);
-        results.push(r);
-      } catch (err) {
-        results.push({ market: fallback.market_id, error: String(err) });
-      }
-      continue;
+      // scope drained; final-drain claim ignoring scope
+      pick = await env.DB.prepare(`
+        UPDATE discovery_queue
+           SET status='syncing', last_run_at=?
+         WHERE rowid = (
+           SELECT rowid FROM discovery_queue
+            WHERE status='pending'
+            ORDER BY
+              CASE WHEN offset > 0 THEN 0 ELSE 1 END,
+              resolved DESC,
+              added_at ASC
+            LIMIT 1
+         )
+        RETURNING scope, market_id, event_slug, offset, oldest_ts,
+                  winning_outcome, resolved
+      `).bind(now).first();
+      if (!pick) break;
     }
     try {
       const r = await scanMarketTradePage(env, pick, windowStart);
       results.push(r);
-      // optimization: if we crossed the 180d edge on this market,
-      // we can quickly mark it done — handled inside scanMarketTradePage
     } catch (err) {
       results.push({ market: pick.market_id, error: String(err) });
-      // don't keep retrying immediately
       await env.DB.prepare(
         "UPDATE discovery_queue SET status='failed', last_run_at=? WHERE scope=? AND market_id=?"
       ).bind(now, pick.scope, pick.market_id).run();
