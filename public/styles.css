@@ -127,15 +127,15 @@ footer a { color: var(--muted); }
 /* ── Stats banner ───────────────────────────────────────────────────── */
 .stats-banner {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
 }
 .stat {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
+  padding: 18px 20px;
 }
 .stat-label { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 500; margin-bottom: 6px; }
 .stat-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
@@ -147,8 +147,8 @@ footer a { color: var(--muted); }
 .tier-filter {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 .chip {
   background: var(--panel);
@@ -181,7 +181,7 @@ footer a { color: var(--muted); }
   font-size: 13.5px;
 }
 .players-table th, .players-table td {
-  padding: 10px 12px;
+  padding: 14px 16px;
   text-align: left;
   border-bottom: 1px solid var(--border);
 }
@@ -204,6 +204,25 @@ footer a { color: var(--muted); }
 .players-table .pnl-pos { color: var(--green); font-weight: 600; }
 .players-table .pnl-neg { color: var(--red); font-weight: 600; }
 .players-table .muted { color: var(--muted); }
+
+/* outlier highlighting — extreme values stand out at a glance */
+.players-table td.outlier {
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: -0.2px;
+}
+.players-table td.outlier.pnl-neg {
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+}
+.players-table td.outlier.pnl-pos {
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+
+/* inline tables inside expand row use lighter spacing */
+.players-table.inline-table { font-size: 12.5px; }
+.players-table.inline-table th { background: transparent; text-transform: none; letter-spacing: 0; font-size: 11px; padding: 8px 10px; }
+.players-table.inline-table td { padding: 8px 10px; }
+.players-table.inline-table { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 
 /* ── Tier badges ────────────────────────────────────────────────────── */
 .tier-badge {
@@ -245,12 +264,15 @@ footer a { color: var(--muted); }
   border-bottom: 1px solid var(--border);
 }
 .expand-inner {
-  padding: 16px 20px;
+  padding: 22px 24px;
   display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 22px;
+  grid-template-columns: minmax(0, 1fr) 300px;
 }
 .expand-side .kv .v { white-space: nowrap; }
+.expand-side .kv { padding: 8px 0; }
+.spark-wrap h4 + table { margin-top: 6px; }
+.spark { margin-bottom: 8px; }
 .expand-inner.loading { color: var(--muted); }
 .spark-wrap { min-width: 0; }
 .spark-wrap h4 { margin: 0 0 8px 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 500; }

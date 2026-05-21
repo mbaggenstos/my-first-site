@@ -216,6 +216,7 @@ function renderPlayers() {
       if (n == null || isNaN(n)) { e.textContent = "—"; e.classList.add("muted"); return e; }
       e.textContent = opts.fmt === "pct" ? pctOrDash(n) : fmtMoney(n);
       if (opts.signed) e.classList.add(n >= 0 ? "pnl-pos" : "pnl-neg");
+      if (opts.outlier) e.classList.add("outlier");
       return e;
     };
 
@@ -249,18 +250,36 @@ function renderPlayers() {
     tierCell.append(buildTierBadge(r.volume));
     tr.append(tierCell);
 
-    tr.append(tdNum(r.pnl, { signed: true }));
+    tr.append(tdNum(r.pnl, { signed: true, outlier: Math.abs(r.pnl || 0) >= 500_000 }));
     tr.append(tdNum(r.unrealized_pnl, { signed: true, hide: "hide-sm" }));
-    tr.append(tdNum(r.total_pnl, { signed: true }));
-    tr.append(tdNum(r.volume, { hide: "hide-sm" }));
-    const markets = td("num hide-md"); markets.textContent = r.markets_played || 0; tr.append(markets);
-    const trades = td("num hide-md"); trades.textContent = r.trades || 0; tr.append(trades);
-    tr.append(tdNum(r.avg_trade_size, { hide: "hide-md" }));
-    tr.append(tdNum(r.largest_trade, { hide: "hide-md" }));
-    tr.append(tdNum(r.win_rate, { fmt: "pct", hide: "hide-md" }));
+    tr.append(tdNum(r.total_pnl, { signed: true, outlier: Math.abs(r.total_pnl || 0) >= 500_000 }));
+    tr.append(tdNum(r.volume, { hide: "hide-sm", outlier: r.volume >= 1_000_000 }));
+    const markets = td("num hide-md"); markets.textContent = r.markets_played || 0;
+    if ((r.markets_played || 0) >= 30) markets.classList.add("outlier");
+    tr.append(markets);
+    const trades = td("num hide-md"); trades.textContent = r.trades || 0;
+    if ((r.trades || 0) >= 1000) trades.classList.add("outlier");
+    tr.append(trades);
+    tr.append(tdNum(r.avg_trade_size, { hide: "hide-md", outlier: r.avg_trade_size >= 50_000 }));
+    tr.append(tdNum(r.largest_trade, { hide: "hide-md", outlier: r.largest_trade >= 100_000 }));
+    const makerTd = td("num hide-md");
+    if (r.maker_ratio == null) { makerTd.textContent = "—"; makerTd.classList.add("muted"); }
+    else {
+      makerTd.textContent = pctOrDash(r.maker_ratio);
+      if (r.maker_ratio >= 0.7) { makerTd.classList.add("pnl-pos", "outlier"); makerTd.title = "Mostly maker — likely sophisticated"; }
+      else if (r.maker_ratio <= 0.2) { makerTd.classList.add("pnl-neg", "outlier"); makerTd.title = "Mostly taker — fish-like"; }
+    }
+    tr.append(makerTd);
+    const winTd = tdNum(r.win_rate, { fmt: "pct", hide: "hide-md" });
+    if (r.win_rate != null) {
+      if (r.win_rate >= 0.6) winTd.classList.add("pnl-pos", "outlier");
+      else if (r.win_rate <= 0.3) winTd.classList.add("pnl-neg", "outlier");
+    }
+    tr.append(winTd);
     const edge = tdNum(r.edge_per_dollar, { fmt: "pct", hide: "hide-md" });
     if (r.edge_per_dollar != null && !isNaN(r.edge_per_dollar)) {
       edge.classList.add(r.edge_per_dollar >= 0 ? "pnl-pos" : "pnl-neg");
+      if (Math.abs(r.edge_per_dollar) >= 0.5) edge.classList.add("outlier");
     }
     tr.append(edge);
 
@@ -328,16 +347,25 @@ function renderDetail(rowData, detail, host) {
   // top markets table below sparkline
   const tm = (detail.top_markets || []).filter((m) => m.tag_slug === state.tag).slice(0, 5);
   if (tm.length) {
-    const h = document.createElement("h4"); h.textContent = "Top markets (P&L)";
+    const h = document.createElement("h4"); h.textContent = "Top markets (by |P&L|)";
     h.style.marginTop = "14px";
     wrap.append(h);
-    wrap.append(renderTopMarketsTable(tm));
+    wrap.append(renderMarketsTable(tm, { showDate: false }));
+  }
+  // recent markets sorted by most recent trade
+  const rm = (detail.recent_markets || []).filter((m) => m.tag_slug === state.tag).slice(0, 10);
+  if (rm.length) {
+    const h = document.createElement("h4"); h.textContent = "Recent activity (by last trade)";
+    h.style.marginTop = "14px";
+    wrap.append(h);
+    wrap.append(renderMarketsTable(rm, { showDate: true }));
   }
   host.append(wrap);
 
   // Side panel: stats grouped
   const tag = (detail.by_tag || []).find((t) => t.tag_slug === state.tag) || {};
   const side = document.createElement("div"); side.className = "expand-side";
+  const makerRatio = tag.maker_ratio;
   const items = [
     ["Markets played",    tag.markets_played != null ? tag.markets_played : "—"],
     ["Trades",            tag.trades != null ? tag.trades : "—"],
@@ -346,6 +374,10 @@ function renderDetail(rowData, detail, host) {
     ["Avg trade size",    fmtMoney(tag.avg_trade_size)],
     ["Avg position",      fmtMoney(tag.avg_position_size)],
     ["Largest trade",     fmtMoney(tag.largest_trade)],
+    ["", null],
+    ["Maker volume",      fmtMoney(tag.maker_volume)],
+    ["Maker / Taker",     makerRatio == null ? "—" :
+      `${(makerRatio * 100).toFixed(0)}% / ${((1 - makerRatio) * 100).toFixed(0)}%`],
     ["", null],
     ["Wins",              String(tag.wins ?? 0)],
     ["Losses",            String(tag.losses ?? 0)],
@@ -379,13 +411,14 @@ function renderDetail(rowData, detail, host) {
   host.append(side);
 }
 
-function renderTopMarketsTable(markets) {
+function renderMarketsTable(markets, opts = {}) {
   const t = document.createElement("table");
-  t.className = "players-table";
-  t.style.cssText = "border:1px solid var(--border); border-radius:10px; overflow:hidden;";
+  t.className = "players-table inline-table";
   const thead = document.createElement("thead");
+  const dateHead = opts.showDate ? "<th>Last trade</th>" : "";
   thead.innerHTML = `<tr>
     <th>Market</th>
+    ${dateHead}
     <th class="num">P&L</th>
     <th class="num">Vol</th>
     <th class="num">Trades</th>
@@ -399,8 +432,12 @@ function renderTopMarketsTable(markets) {
     const link = m.market_slug
       ? `<a href="https://polymarket.com/market/${m.market_slug}" target="_blank" rel="noopener">${title}</a>`
       : title;
+    const dateCell = opts.showDate
+      ? `<td class="muted" style="font-size:11.5px; white-space:nowrap;">${new Date((m.last_trade_ts || 0) * 1000).toISOString().slice(0, 10)}</td>`
+      : "";
     tr.innerHTML = `
       <td>${link}</td>
+      ${dateCell}
       <td class="num ${m.pnl >= 0 ? "pnl-pos" : "pnl-neg"}">${fmtMoney(m.pnl)}</td>
       <td class="num">${fmtMoney(m.volume)}</td>
       <td class="num">${m.trades}</td>

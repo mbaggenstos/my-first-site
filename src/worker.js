@@ -165,6 +165,13 @@ async function scanMarketTradePage(env, row, windowStart) {
     const value = shares * price;
     if (shares === 0) continue;
 
+    // Maker-side estimate: a clean integer-cent price (0.50, 0.27 …) implies
+    // the fill happened against a clean limit order. Non-clean prices like
+    // 0.5666003 indicate a taker sweep through multiple book levels.
+    const cents = price * 100;
+    const isCleanCent = Math.abs(cents - Math.round(cents)) < 0.001;
+    const makerVol = isCleanCent ? value : 0;
+
     if (!users.has(addr)) {
       users.set(addr, {
         pseudonym: t.pseudonym || null,
@@ -188,24 +195,26 @@ async function scanMarketTradePage(env, row, windowStart) {
     const day = Math.floor(ts / DAY);
     const k = `${addr}|${day}`;
     const b = buckets.get(k) || {
-      pnl: 0, volume: 0, trades: 0, wins: 0, losses: 0, edge: 0,
+      pnl: 0, volume: 0, trades: 0, wins: 0, losses: 0, edge: 0, makerVol: 0,
     };
-    b.volume += value;
-    b.trades += 1;
-    b.pnl    += realized;
-    b.edge   += realized; // same metric in resolved-trade model
+    b.volume   += value;
+    b.makerVol += makerVol;
+    b.trades   += 1;
+    b.pnl      += realized;
+    b.edge     += realized;
     if (won === true)  b.wins   += 1;
     if (won === false) b.losses += 1;
     buckets.set(k, b);
 
     // per-(user, market) aggregate
     const pm = perMarket.get(addr) || {
-      trades: 0, volume: 0, pnl: 0, largestTrade: 0,
+      trades: 0, volume: 0, makerVol: 0, pnl: 0, largestTrade: 0,
       firstTs: ts, lastTs: ts,
     };
-    pm.trades += 1;
-    pm.volume += value;
-    pm.pnl    += realized;
+    pm.trades   += 1;
+    pm.volume   += value;
+    pm.makerVol += makerVol;
+    pm.pnl      += realized;
     if (value > pm.largestTrade) pm.largestTrade = value;
     if (ts < pm.firstTs) pm.firstTs = ts;
     if (ts > pm.lastTs)  pm.lastTs  = ts;
@@ -230,31 +239,33 @@ async function scanMarketTradePage(env, row, windowStart) {
     const [addr, dayStr] = k.split("|");
     stmts.push(env.DB.prepare(`
       INSERT INTO user_tag_daily
-        (user_addr, tag_slug, day, pnl, volume, trades, wins, losses, edge)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (user_addr, tag_slug, day, pnl, volume, trades, wins, losses, edge, maker_volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_addr, tag_slug, day) DO UPDATE SET
-        pnl    = pnl    + excluded.pnl,
-        volume = volume + excluded.volume,
-        trades = trades + excluded.trades,
-        wins   = wins   + excluded.wins,
-        losses = losses + excluded.losses,
-        edge   = edge   + excluded.edge
-    `).bind(addr, tag, Number(dayStr), v.pnl, v.volume, v.trades, v.wins, v.losses, v.edge));
+        pnl          = pnl          + excluded.pnl,
+        volume       = volume       + excluded.volume,
+        trades       = trades       + excluded.trades,
+        wins         = wins         + excluded.wins,
+        losses       = losses       + excluded.losses,
+        edge         = edge         + excluded.edge,
+        maker_volume = maker_volume + excluded.maker_volume
+    `).bind(addr, tag, Number(dayStr), v.pnl, v.volume, v.trades, v.wins, v.losses, v.edge, v.makerVol));
   }
   for (const [addr, v] of perMarket) {
     stmts.push(env.DB.prepare(`
       INSERT INTO user_tag_market
-        (user_addr, tag_slug, condition_id, trades, volume, pnl,
+        (user_addr, tag_slug, condition_id, trades, volume, maker_volume, pnl,
          largest_trade, first_trade_ts, last_trade_ts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_addr, tag_slug, condition_id) DO UPDATE SET
         trades         = trades         + excluded.trades,
         volume         = volume         + excluded.volume,
+        maker_volume   = maker_volume   + excluded.maker_volume,
         pnl            = pnl            + excluded.pnl,
         largest_trade  = MAX(largest_trade, excluded.largest_trade),
         first_trade_ts = MIN(first_trade_ts, excluded.first_trade_ts),
         last_trade_ts  = MAX(last_trade_ts,  excluded.last_trade_ts)
-    `).bind(addr, tag, conditionId, v.trades, v.volume, v.pnl, v.largestTrade, v.firstTs, v.lastTs));
+    `).bind(addr, tag, conditionId, v.trades, v.volume, v.makerVol, v.pnl, v.largestTrade, v.firstTs, v.lastTs));
   }
 
   const newOffset = offset + (trades.length || 0);
@@ -535,6 +546,7 @@ async function apiLeaderboard(env, url) {
       u.lb_amount                                    AS lb_amount,
       SUM(utd.pnl)                                   AS pnl,
       SUM(utd.volume)                                AS volume,
+      SUM(utd.maker_volume)                          AS maker_volume,
       SUM(utd.trades)                                AS trades,
       SUM(utd.wins)                                  AS wins,
       SUM(utd.losses)                                AS losses,
@@ -572,6 +584,7 @@ async function apiLeaderboard(env, url) {
     r.avg_trade_size = r.trades > 0 ? r.volume / r.trades : 0;
     r.avg_position_size = r.markets_played > 0 ? r.volume / r.markets_played : 0;
     r.trades_per_market = r.markets_played > 0 ? r.trades / r.markets_played : 0;
+    r.maker_ratio = r.volume > 0 ? (r.maker_volume || 0) / r.volume : null;
   }
 
   return jsonResponse({ tag, window_days: window, order, count: rows.length, rows });
@@ -589,13 +602,14 @@ async function apiUser(env, addr) {
   const tagRows = (await env.DB.prepare(`
     SELECT
       utd.tag_slug,
-      SUM(utd.pnl)    AS pnl,
-      SUM(utd.volume) AS volume,
-      SUM(utd.trades) AS trades,
-      SUM(utd.wins)   AS wins,
-      SUM(utd.losses) AS losses,
-      SUM(utd.edge)   AS edge,
-      MAX(utd.day)    AS last_day,
+      SUM(utd.pnl)          AS pnl,
+      SUM(utd.volume)       AS volume,
+      SUM(utd.maker_volume) AS maker_volume,
+      SUM(utd.trades)       AS trades,
+      SUM(utd.wins)         AS wins,
+      SUM(utd.losses)       AS losses,
+      SUM(utd.edge)         AS edge,
+      MAX(utd.day)          AS last_day,
       COALESCE(unr.cash_pnl, 0)        AS unrealized_pnl,
       COALESCE(unr.current_value, 0)   AS unrealized_value,
       COALESCE(unr.open_positions, 0)  AS open_positions,
@@ -628,6 +642,7 @@ async function apiUser(env, addr) {
     r.avg_trade_size = r.trades > 0 ? r.volume / r.trades : 0;
     r.avg_position_size = r.markets_played > 0 ? r.volume / r.markets_played : 0;
     r.trades_per_market = r.markets_played > 0 ? r.trades / r.markets_played : 0;
+    r.maker_ratio = r.volume > 0 ? (r.maker_volume || 0) / r.volume : null;
   }
 
   const dailyRows = (await env.DB.prepare(`
@@ -637,9 +652,10 @@ async function apiUser(env, addr) {
      ORDER BY day ASC
   `).bind(a, minDay).all()).results;
 
-  // top markets for this user (best + worst by P&L, biggest by volume)
+  // top markets by absolute P&L
   const topMarkets = (await env.DB.prepare(`
-    SELECT utm.tag_slug, utm.condition_id, utm.trades, utm.volume, utm.pnl,
+    SELECT utm.tag_slug, utm.condition_id, utm.trades, utm.volume,
+           utm.maker_volume, utm.pnl,
            utm.largest_trade, utm.first_trade_ts, utm.last_trade_ts,
            m.title, m.market_slug, m.event_slug, m.resolved, m.winning_outcome
       FROM user_tag_market utm
@@ -649,7 +665,24 @@ async function apiUser(env, addr) {
      LIMIT 10
   `).bind(a).all()).results;
 
-  return jsonResponse({ user, by_tag: tagRows, daily: dailyRows, top_markets: topMarkets });
+  // markets sorted by most recent trade timestamp (the "in-play review")
+  const recentMarkets = (await env.DB.prepare(`
+    SELECT utm.tag_slug, utm.condition_id, utm.trades, utm.volume,
+           utm.maker_volume, utm.pnl,
+           utm.largest_trade, utm.first_trade_ts, utm.last_trade_ts,
+           m.title, m.market_slug, m.event_slug, m.resolved, m.winning_outcome,
+           m.end_date
+      FROM user_tag_market utm
+      LEFT JOIN markets m ON m.condition_id = utm.condition_id
+     WHERE utm.user_addr = ?
+     ORDER BY utm.last_trade_ts DESC
+     LIMIT 30
+  `).bind(a).all()).results;
+
+  return jsonResponse({
+    user, by_tag: tagRows, daily: dailyRows,
+    top_markets: topMarkets, recent_markets: recentMarkets,
+  });
 }
 
 async function apiStatus(env) {
