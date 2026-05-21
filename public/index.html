@@ -12,27 +12,65 @@
     <span class="dot"></span>
     <h1>Polymarket Viewer</h1>
   </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-view="markets" role="tab">Markets</button>
+    <button class="tab" data-view="players" role="tab">Players</button>
+  </nav>
   <div class="controls">
-    <label class="search">
-      <input id="search" type="search" placeholder="Märkte durchsuchen…" autocomplete="off" />
-    </label>
-    <select id="sort" aria-label="Sortierung">
-      <option value="volume">Volumen</option>
-      <option value="liquidity">Liquidität</option>
-      <option value="newest">Neueste</option>
-      <option value="ending">Endet bald</option>
-    </select>
+    <div class="controls-for-markets">
+      <label class="search">
+        <input id="search" type="search" placeholder="Märkte durchsuchen…" autocomplete="off" />
+      </label>
+      <select id="sort" aria-label="Sortierung">
+        <option value="volume">Volumen</option>
+        <option value="liquidity">Liquidität</option>
+        <option value="newest">Neueste</option>
+        <option value="ending">Endet bald</option>
+      </select>
+    </div>
+    <div class="controls-for-players" hidden>
+      <select id="tagSel" aria-label="Tag">
+        <option value="ufc">UFC</option>
+        <option value="tennis" selected>Tennis</option>
+      </select>
+      <select id="orderSel" aria-label="Sortierung">
+        <option value="loss">Verlierer</option>
+        <option value="profit">Gewinner</option>
+      </select>
+    </div>
     <button id="refresh" type="button" title="Neu laden">↻</button>
   </div>
 </header>
 
 <main>
-  <section id="status" class="status" aria-live="polite">Lade Märkte…</section>
-  <section id="markets" class="grid" aria-busy="true"></section>
+  <section id="markets-view" class="view">
+    <section id="status" class="status" aria-live="polite">Lade Märkte…</section>
+    <section id="markets" class="grid" aria-busy="true"></section>
+  </section>
+
+  <section id="players-view" class="view" hidden>
+    <section id="players-status" class="status" aria-live="polite">Lade Players…</section>
+    <table class="players-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Player</th>
+          <th class="num">P&L 180d</th>
+          <th class="num">Unrealized</th>
+          <th class="num">Total</th>
+          <th class="num">Volume</th>
+          <th class="num">Trades</th>
+          <th class="num">Win-Rate</th>
+          <th class="num">Edge/$</th>
+        </tr>
+      </thead>
+      <tbody id="players-body"></tbody>
+    </table>
+  </section>
 </main>
 
 <footer>
-  <p>Daten via <a href="https://gamma-api.polymarket.com" target="_blank" rel="noopener">Polymarket Gamma API</a>. Keine Anlageberatung.</p>
+  <p>Daten via <a href="https://gamma-api.polymarket.com" target="_blank" rel="noopener">Polymarket Gamma API</a> &amp; data-api. Keine Anlageberatung.</p>
 </footer>
 
 <template id="card-tpl">

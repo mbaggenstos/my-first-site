@@ -8,8 +8,20 @@ const $sort = document.getElementById("sort");
 const $refresh = document.getElementById("refresh");
 const $tpl = document.getElementById("card-tpl");
 
-let allMarkets = [];
+const $tabs = document.querySelectorAll(".tab");
+const $marketsView = document.getElementById("markets-view");
+const $playersView = document.getElementById("players-view");
+const $marketsCtrl = document.querySelector(".controls-for-markets");
+const $playersCtrl = document.querySelector(".controls-for-players");
+const $tagSel = document.getElementById("tagSel");
+const $orderSel = document.getElementById("orderSel");
+const $playersStatus = document.getElementById("players-status");
+const $playersBody = document.getElementById("players-body");
 
+let allMarkets = [];
+let currentView = "markets";
+
+// ─── Markets ───────────────────────────────────────────────────────────────
 function parseMaybeJson(v, fallback) {
   if (v == null) return fallback;
   if (Array.isArray(v)) return v;
@@ -21,10 +33,12 @@ function parseMaybeJson(v, fallback) {
 
 function fmtMoney(n) {
   if (n == null || isNaN(n)) return "—";
-  if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
-  if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
-  if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "k";
-  return "$" + Math.round(n);
+  const sign = n < 0 ? "−" : "";
+  const a = Math.abs(n);
+  if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(2) + "B";
+  if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(2) + "M";
+  if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(1) + "k";
+  return sign + "$" + Math.round(a);
 }
 
 function fmtDate(d) {
@@ -55,7 +69,7 @@ async function fetchMarkets() {
   return Array.isArray(data) ? data : (data.data || []);
 }
 
-function normalize(m) {
+function normalizeMarket(m) {
   const outcomes = parseMaybeJson(m.outcomes, []);
   const prices = parseMaybeJson(m.outcomePrices, []).map(Number);
   const items = outcomes.map((name, i) => ({
@@ -76,7 +90,7 @@ function normalize(m) {
   };
 }
 
-function sortBy(arr, mode) {
+function sortMarkets(arr, mode) {
   const a = [...arr];
   switch (mode) {
     case "liquidity": a.sort((x, y) => y.liquidity - x.liquidity); break;
@@ -88,13 +102,13 @@ function sortBy(arr, mode) {
   return a;
 }
 
-function filterBy(arr, q) {
+function filterMarkets(arr, q) {
   const s = q.trim().toLowerCase();
   if (!s) return arr;
   return arr.filter(m => m.question.toLowerCase().includes(s));
 }
 
-function render(list) {
+function renderMarkets(list) {
   $grid.replaceChildren();
   if (!list.length) {
     $status.textContent = "Keine Märkte gefunden.";
@@ -134,20 +148,20 @@ function render(list) {
   $grid.setAttribute("aria-busy", "false");
 }
 
-function update() {
-  const filtered = filterBy(allMarkets, $search.value);
-  const sorted = sortBy(filtered, $sort.value);
-  render(sorted);
+function updateMarkets() {
+  const filtered = filterMarkets(allMarkets, $search.value);
+  const sorted = sortMarkets(filtered, $sort.value);
+  renderMarkets(sorted);
 }
 
-async function load() {
+async function loadMarkets() {
   $grid.setAttribute("aria-busy", "true");
   $status.textContent = "Lade Märkte…";
   $grid.replaceChildren();
   try {
     const raw = await fetchMarkets();
-    allMarkets = raw.map(normalize).filter(m => m.outcomes.length > 0);
-    update();
+    allMarkets = raw.map(normalizeMarket).filter(m => m.outcomes.length > 0);
+    updateMarkets();
   } catch (err) {
     $status.innerHTML = "";
     const box = document.createElement("div");
@@ -158,8 +172,116 @@ async function load() {
   }
 }
 
-$search.addEventListener("input", update);
-$sort.addEventListener("change", update);
-$refresh.addEventListener("click", load);
+// ─── Players ───────────────────────────────────────────────────────────────
+function shortAddr(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
 
-load();
+function pctOrDash(n) {
+  if (n == null) return "—";
+  return (n * 100).toFixed(1) + "%";
+}
+
+function renderPlayers(rows) {
+  $playersBody.replaceChildren();
+  if (!rows.length) {
+    $playersStatus.textContent = "Noch keine Player-Daten — Cron syncht im Hintergrund.";
+    return;
+  }
+  $playersStatus.textContent = `${rows.length} Player`;
+  const frag = document.createDocumentFragment();
+  rows.forEach((r, i) => {
+    const tr = document.createElement("tr");
+
+    const td = (cls = "") => { const e = document.createElement("td"); if (cls) e.className = cls; return e; };
+    const tdNum = (n, signed = false) => {
+      const e = td("num");
+      if (n == null || isNaN(n)) { e.textContent = "—"; return e; }
+      e.textContent = fmtMoney(n);
+      if (signed) e.className += n >= 0 ? " pnl-pos" : " pnl-neg";
+      return e;
+    };
+
+    const rank = td(); rank.textContent = i + 1; tr.append(rank);
+
+    const player = td("player-cell");
+    if (r.profile_image) {
+      const img = document.createElement("img");
+      img.src = r.profile_image; img.loading = "lazy"; img.alt = "";
+      player.append(img);
+    } else {
+      const sp = document.createElement("span");
+      sp.style.cssText = "width:24px;height:24px;background:var(--panel-2);border-radius:50%;flex:0 0 24px";
+      player.append(sp);
+    }
+    const wrap = document.createElement("div");
+    const name = document.createElement("div"); name.className = "player-name";
+    name.textContent = r.name || r.pseudonym || shortAddr(r.address);
+    const addr = document.createElement("a"); addr.className = "player-addr";
+    addr.textContent = shortAddr(r.address);
+    addr.href = "https://polymarket.com/profile/" + r.address;
+    addr.target = "_blank"; addr.rel = "noopener";
+    wrap.append(name, addr);
+    player.append(wrap);
+    tr.append(player);
+
+    tr.append(tdNum(r.pnl, true));
+    tr.append(tdNum(r.unrealized_pnl, true));
+    tr.append(tdNum(r.total_pnl, true));
+    tr.append(tdNum(r.volume));
+    const trades = td("num"); trades.textContent = r.trades || 0; tr.append(trades);
+    const winRate = td("num");
+    winRate.textContent = pctOrDash(r.win_rate);
+    if (r.win_rate == null) winRate.className += " muted";
+    tr.append(winRate);
+    const edge = td("num");
+    edge.textContent = r.edge_per_dollar == null ? "—" : pctOrDash(r.edge_per_dollar);
+    if (r.edge_per_dollar == null) edge.className += " muted";
+    else if (r.edge_per_dollar > 0) edge.className += " pnl-pos";
+    else edge.className += " pnl-neg";
+    tr.append(edge);
+
+    frag.append(tr);
+  });
+  $playersBody.append(frag);
+}
+
+async function loadPlayers() {
+  $playersStatus.textContent = "Lade Players…";
+  $playersBody.replaceChildren();
+  try {
+    const u = new URL("/api/leaderboard", location.origin);
+    u.searchParams.set("tag", $tagSel.value);
+    u.searchParams.set("order", $orderSel.value);
+    u.searchParams.set("limit", "100");
+    const res = await fetch(u);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderPlayers(data.rows || []);
+  } catch (err) {
+    $playersStatus.innerHTML = "";
+    const box = document.createElement("div");
+    box.className = "error";
+    box.textContent = "Konnte Leaderboard nicht laden: " + err.message;
+    $playersStatus.append(box);
+  }
+}
+
+// ─── Tab navigation ────────────────────────────────────────────────────────
+function setView(name) {
+  currentView = name;
+  for (const t of $tabs) t.classList.toggle("active", t.dataset.view === name);
+  $marketsView.hidden = name !== "markets";
+  $playersView.hidden = name !== "players";
+  $marketsCtrl.hidden = name !== "markets";
+  $playersCtrl.hidden = name !== "players";
+  if (name === "players") loadPlayers();
+}
+
+for (const t of $tabs) t.addEventListener("click", () => setView(t.dataset.view));
+
+$search.addEventListener("input", updateMarkets);
+$sort.addEventListener("change", updateMarkets);
+$tagSel.addEventListener("change", loadPlayers);
+$orderSel.addEventListener("change", loadPlayers);
+$refresh.addEventListener("click", () => currentView === "markets" ? loadMarkets() : loadPlayers());
+
+loadMarkets();
