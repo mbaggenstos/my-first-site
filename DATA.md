@@ -1,6 +1,6 @@
-# How the Fish-Spotter Works
+# PolymarketFishWatch — how the data pipeline works
 
-This is an analytics pipeline for finding **bad traders ("fish")** on
+This is the analytics pipeline behind **PolymarketFishWatch** — a tool for finding **bad traders ("fish")** on
 Polymarket UFC and Tennis markets. A fish is anyone whose live betting
 behaviour repeatedly costs them money — the kind of counterparty you
 want to be opposite of.
