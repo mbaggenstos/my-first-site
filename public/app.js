@@ -13,13 +13,27 @@ const $marketsView = document.getElementById("markets-view");
 const $playersView = document.getElementById("players-view");
 const $marketsCtrl = document.querySelector(".controls-for-markets");
 const $playersCtrl = document.querySelector(".controls-for-players");
-const $tagSel = document.getElementById("tagSel");
-const $orderSel = document.getElementById("orderSel");
+const $tagSeg = document.querySelectorAll(".seg-btn[data-tag]");
+const $orderSeg = document.querySelectorAll(".seg-btn[data-order]");
+const $minTrades = document.getElementById("minTrades");
+const $playersStats = document.getElementById("players-stats");
 const $playersStatus = document.getElementById("players-status");
+const $playersTable = document.getElementById("players-table");
 const $playersBody = document.getElementById("players-body");
+const $statsTpl = document.getElementById("stats-tpl");
+const $tableHeaders = document.querySelectorAll("#players-table th.sortable");
 
 let allMarkets = [];
 let currentView = "markets";
+const playersState = {
+  tag: "ufc",
+  order: "loss",
+  rows: [],
+  sortKey: "pnl",
+  sortDir: "asc",
+  expandedAddr: null,
+};
+const userDetailCache = new Map();
 
 // ─── Markets ───────────────────────────────────────────────────────────────
 function parseMaybeJson(v, fallback) {
@@ -175,93 +189,342 @@ async function loadMarkets() {
 // ─── Players ───────────────────────────────────────────────────────────────
 function shortAddr(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
 
-function pctOrDash(n) {
-  if (n == null) return "—";
-  return (n * 100).toFixed(1) + "%";
+function pctOrDash(n, digits = 1) {
+  if (n == null || isNaN(n)) return "—";
+  return (n * 100).toFixed(digits) + "%";
 }
 
-function renderPlayers(rows) {
+function renderSkeleton() {
   $playersBody.replaceChildren();
-  if (!rows.length) {
-    $playersStatus.textContent = "Noch keine Player-Daten — Cron syncht im Hintergrund.";
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < 8; i++) {
+    const tr = document.createElement("tr");
+    tr.className = "skeleton-row";
+    for (let c = 0; c < 9; c++) {
+      const td = document.createElement("td");
+      const b = document.createElement("div");
+      b.className = "skeleton-bar";
+      b.style.width = c === 1 ? "70%" : "60%";
+      td.append(b);
+      tr.append(td);
+    }
+    frag.append(tr);
+  }
+  $playersBody.append(frag);
+}
+
+function renderStats(rows, totalRows) {
+  $playersStats.replaceChildren();
+  if (!rows.length) return;
+  const stats = [
+    { label: "Players (gefiltert)", value: String(rows.length), sub: `von ${totalRows}` },
+    { label: "Σ Volume 180d", value: fmtMoney(rows.reduce((s, r) => s + (r.volume || 0), 0)) },
+    { label: "Σ P&L 180d", valueRaw: rows.reduce((s, r) => s + (r.pnl || 0), 0), signed: true },
+    {
+      label: playersState.order === "loss" ? "Größter Loss" : "Größter Win",
+      valueRaw: playersState.order === "loss"
+        ? Math.min(...rows.map((r) => r.pnl || 0))
+        : Math.max(...rows.map((r) => r.pnl || 0)),
+      signed: true,
+    },
+  ];
+  const frag = document.createDocumentFragment();
+  for (const s of stats) {
+    const node = $statsTpl.content.firstElementChild.cloneNode(true);
+    node.querySelector(".stat-label").textContent = s.label;
+    const v = node.querySelector(".stat-value");
+    if (s.valueRaw != null) {
+      v.textContent = fmtMoney(s.valueRaw);
+      if (s.signed) v.classList.add(s.valueRaw >= 0 ? "pos" : "neg");
+    } else {
+      v.textContent = s.value;
+    }
+    if (s.sub) {
+      const sub = document.createElement("div");
+      sub.className = "stat-sub";
+      sub.textContent = s.sub;
+      node.append(sub);
+    }
+    frag.append(node);
+  }
+  $playersStats.append(frag);
+}
+
+function applyFilterAndSort(rows) {
+  const minT = Number($minTrades.value || 0);
+  let out = rows.filter((r) => (r.trades || 0) >= minT);
+  const k = playersState.sortKey;
+  const dir = playersState.sortDir === "asc" ? 1 : -1;
+  out.sort((a, b) => {
+    const av = a[k]; const bv = b[k];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (av - bv) * dir;
+  });
+  return out;
+}
+
+function renderPlayers() {
+  const filtered = applyFilterAndSort(playersState.rows);
+  renderStats(filtered, playersState.rows.length);
+  $playersBody.replaceChildren();
+  if (!filtered.length) {
+    $playersStatus.textContent = playersState.rows.length
+      ? "Keine Player passen zum Filter."
+      : `Noch keine Player-Daten für ${playersState.tag.toUpperCase()} — Cron syncht im Hintergrund.`;
     return;
   }
-  $playersStatus.textContent = `${rows.length} Player`;
+  $playersStatus.textContent = `${filtered.length} Player`;
+
   const frag = document.createDocumentFragment();
-  rows.forEach((r, i) => {
+  filtered.forEach((r, i) => {
     const tr = document.createElement("tr");
+    tr.className = "row";
+    tr.dataset.addr = r.address;
+    if (r.address === playersState.expandedAddr) tr.classList.add("open");
 
     const td = (cls = "") => { const e = document.createElement("td"); if (cls) e.className = cls; return e; };
-    const tdNum = (n, signed = false) => {
-      const e = td("num");
-      if (n == null || isNaN(n)) { e.textContent = "—"; return e; }
-      e.textContent = fmtMoney(n);
-      if (signed) e.className += n >= 0 ? " pnl-pos" : " pnl-neg";
+    const tdNum = (n, opts = {}) => {
+      const e = td("num" + (opts.hide ? " " + opts.hide : ""));
+      if (n == null || isNaN(n)) { e.textContent = "—"; e.classList.add("muted"); return e; }
+      if (opts.fmt === "pct") {
+        e.textContent = pctOrDash(n);
+      } else {
+        e.textContent = fmtMoney(n);
+      }
+      if (opts.signed) e.classList.add(n >= 0 ? "pnl-pos" : "pnl-neg");
       return e;
     };
 
-    const rank = td(); rank.textContent = i + 1; tr.append(rank);
+    const rank = td("col-rank"); rank.textContent = i + 1; tr.append(rank);
 
-    const player = td("player-cell");
+    const player = td("col-player");
+    const inner = document.createElement("div");
+    inner.className = "player-cell";
     if (r.profile_image) {
       const img = document.createElement("img");
       img.src = r.profile_image; img.loading = "lazy"; img.alt = "";
-      player.append(img);
+      inner.append(img);
     } else {
-      const sp = document.createElement("span");
-      sp.style.cssText = "width:24px;height:24px;background:var(--panel-2);border-radius:50%;flex:0 0 24px";
-      player.append(sp);
+      const av = document.createElement("span"); av.className = "av";
+      inner.append(av);
     }
-    const wrap = document.createElement("div");
+    const meta = document.createElement("div");
+    meta.className = "player-meta";
     const name = document.createElement("div"); name.className = "player-name";
     name.textContent = r.name || r.pseudonym || shortAddr(r.address);
-    const addr = document.createElement("a"); addr.className = "player-addr";
+    const addr = document.createElement("span"); addr.className = "player-addr";
     addr.textContent = shortAddr(r.address);
-    addr.href = "https://polymarket.com/profile/" + r.address;
-    addr.target = "_blank"; addr.rel = "noopener";
-    wrap.append(name, addr);
-    player.append(wrap);
+    meta.append(name, addr);
+    inner.append(meta);
+    player.append(inner);
     tr.append(player);
 
-    tr.append(tdNum(r.pnl, true));
-    tr.append(tdNum(r.unrealized_pnl, true));
-    tr.append(tdNum(r.total_pnl, true));
-    tr.append(tdNum(r.volume));
-    const trades = td("num"); trades.textContent = r.trades || 0; tr.append(trades);
-    const winRate = td("num");
-    winRate.textContent = pctOrDash(r.win_rate);
-    if (r.win_rate == null) winRate.className += " muted";
-    tr.append(winRate);
-    const edge = td("num");
-    edge.textContent = r.edge_per_dollar == null ? "—" : pctOrDash(r.edge_per_dollar);
-    if (r.edge_per_dollar == null) edge.className += " muted";
-    else if (r.edge_per_dollar > 0) edge.className += " pnl-pos";
-    else edge.className += " pnl-neg";
+    tr.append(tdNum(r.pnl, { signed: true }));
+    tr.append(tdNum(r.unrealized_pnl, { signed: true, hide: "hide-sm" }));
+    tr.append(tdNum(r.total_pnl, { signed: true }));
+    tr.append(tdNum(r.volume, { hide: "hide-sm" }));
+    const trades = td("num hide-md"); trades.textContent = r.trades || 0; tr.append(trades);
+    tr.append(tdNum(r.win_rate, { fmt: "pct", hide: "hide-md" }));
+    const edge = tdNum(r.edge_per_dollar, { fmt: "pct", hide: "hide-md" });
+    if (r.edge_per_dollar != null && !isNaN(r.edge_per_dollar)) {
+      edge.classList.add(r.edge_per_dollar >= 0 ? "pnl-pos" : "pnl-neg");
+    }
     tr.append(edge);
 
+    tr.addEventListener("click", () => togglePlayerRow(r.address, tr));
     frag.append(tr);
+
+    if (r.address === playersState.expandedAddr) {
+      const exp = buildExpandRow(r);
+      frag.append(exp);
+    }
   });
   $playersBody.append(frag);
 }
 
+function buildExpandRow(rowData) {
+  const exp = document.createElement("tr");
+  exp.className = "expand-row";
+  const td = document.createElement("td");
+  td.colSpan = 9;
+  const inner = document.createElement("div");
+  inner.className = "expand-inner loading";
+  inner.textContent = "Lade Daily-Daten…";
+  td.append(inner);
+  exp.append(td);
+  fetchAndRenderDetail(rowData, inner);
+  return exp;
+}
+
+async function fetchAndRenderDetail(rowData, host) {
+  try {
+    let detail = userDetailCache.get(rowData.address);
+    if (!detail) {
+      const res = await fetch("/api/users/" + rowData.address);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      detail = await res.json();
+      userDetailCache.set(rowData.address, detail);
+    }
+    renderDetail(rowData, detail, host);
+  } catch (err) {
+    host.classList.remove("loading");
+    host.textContent = "Fehler: " + err.message;
+  }
+}
+
+function renderDetail(rowData, detail, host) {
+  host.classList.remove("loading");
+  host.replaceChildren();
+
+  // Sparkline data: aggregate per-day P&L for the currently-selected tag
+  const daily = (detail.daily || []).filter((d) => d.tag_slug === playersState.tag);
+  const today = Math.floor(Date.now() / 1000 / 86400);
+  const start = today - 180;
+  // build full series with zeros for missing days
+  const byDay = new Map(daily.map((d) => [d.day, d]));
+  const series = [];
+  for (let d = start; d <= today; d++) {
+    const r = byDay.get(d);
+    series.push({ day: d, pnl: r ? r.pnl : 0, trades: r ? r.trades : 0 });
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "spark-wrap";
+  const title = document.createElement("h4");
+  title.textContent = `Daily P&L · ${playersState.tag.toUpperCase()} · letzte 180 Tage`;
+  wrap.append(title);
+  wrap.append(renderSpark(series));
+  host.append(wrap);
+
+  // side panel: key tag stats + link
+  const side = document.createElement("div");
+  side.className = "expand-side";
+  const stats = (detail.by_tag || []).find((t) => t.tag_slug === playersState.tag);
+  const sync = detail.sync || {};
+  const items = [
+    ["Win-Rate", pctOrDash(stats?.win_rate)],
+    ["Edge/$", pctOrDash(stats?.edge_per_dollar)],
+    ["Wins", String(stats?.wins ?? 0)],
+    ["Losses", String(stats?.losses ?? 0)],
+    ["Open Positions", String(stats?.open_positions ?? 0)],
+    ["All-time Profit", fmtMoney(detail.user?.lb_amount)],
+    ["Backfill", sync.backfill_done ? "✓ complete" : "läuft…"],
+  ];
+  for (const [k, v] of items) {
+    const row = document.createElement("div");
+    row.className = "kv";
+    const ke = document.createElement("span"); ke.className = "k"; ke.textContent = k;
+    const ve = document.createElement("span"); ve.className = "v"; ve.textContent = v;
+    row.append(ke, ve);
+    side.append(row);
+  }
+  const link = document.createElement("a");
+  link.className = "open-profile";
+  link.target = "_blank"; link.rel = "noopener";
+  link.href = "https://polymarket.com/profile/" + rowData.address;
+  link.textContent = "Auf Polymarket öffnen ↗";
+  side.append(link);
+  host.append(side);
+}
+
+function renderSpark(series) {
+  const W = 600, H = 120, PAD = 4;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "spark");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+
+  const maxAbs = Math.max(1, ...series.map((s) => Math.abs(s.pnl || 0)));
+  const barW = (W - 2 * PAD) / series.length;
+  const mid = H / 2;
+  const scale = (mid - PAD) / maxAbs;
+
+  // zero axis
+  const axis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  axis.setAttribute("x1", PAD); axis.setAttribute("x2", W - PAD);
+  axis.setAttribute("y1", mid); axis.setAttribute("y2", mid);
+  axis.setAttribute("class", "spark-axis");
+  svg.append(axis);
+
+  // bars
+  series.forEach((s, i) => {
+    if (!s.pnl) return;
+    const x = PAD + i * barW;
+    const h = Math.abs(s.pnl) * scale;
+    const y = s.pnl >= 0 ? mid - h : mid;
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", Math.max(0.5, barW - 0.5));
+    rect.setAttribute("height", h);
+    rect.setAttribute("class", s.pnl >= 0 ? "spark-bar-pos" : "spark-bar-neg");
+    const titleEl = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    const date = new Date(s.day * 86400 * 1000);
+    titleEl.textContent = `${date.toISOString().slice(0, 10)}: ${fmtMoney(s.pnl)}`;
+    rect.append(titleEl);
+    svg.append(rect);
+  });
+
+  // axis labels (max/min markers)
+  const lblMax = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  lblMax.setAttribute("x", PAD); lblMax.setAttribute("y", PAD + 10);
+  lblMax.setAttribute("class", "spark-label");
+  lblMax.textContent = "+" + fmtMoney(maxAbs);
+  svg.append(lblMax);
+  const lblMin = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  lblMin.setAttribute("x", PAD); lblMin.setAttribute("y", H - PAD - 2);
+  lblMin.setAttribute("class", "spark-label");
+  lblMin.textContent = "−" + fmtMoney(maxAbs);
+  svg.append(lblMin);
+
+  return svg;
+}
+
+function togglePlayerRow(addr, tr) {
+  if (playersState.expandedAddr === addr) {
+    playersState.expandedAddr = null;
+  } else {
+    playersState.expandedAddr = addr;
+  }
+  renderPlayers();
+}
+
 async function loadPlayers() {
+  renderSkeleton();
   $playersStatus.textContent = "Lade Players…";
-  $playersBody.replaceChildren();
+  $playersStats.replaceChildren();
   try {
     const u = new URL("/api/leaderboard", location.origin);
-    u.searchParams.set("tag", $tagSel.value);
-    u.searchParams.set("order", $orderSel.value);
-    u.searchParams.set("limit", "100");
+    u.searchParams.set("tag", playersState.tag);
+    u.searchParams.set("order", playersState.order);
+    u.searchParams.set("limit", "200");
     const res = await fetch(u);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderPlayers(data.rows || []);
+    playersState.rows = data.rows || [];
+    // align default sort with order
+    playersState.sortKey = "pnl";
+    playersState.sortDir = playersState.order === "loss" ? "asc" : "desc";
+    updateSortIndicators();
+    renderPlayers();
   } catch (err) {
+    $playersBody.replaceChildren();
     $playersStatus.innerHTML = "";
     const box = document.createElement("div");
     box.className = "error";
     box.textContent = "Konnte Leaderboard nicht laden: " + err.message;
     $playersStatus.append(box);
+  }
+}
+
+function updateSortIndicators() {
+  for (const th of $tableHeaders) {
+    th.classList.remove("sort-asc", "sort-desc");
+    if (th.dataset.sort === playersState.sortKey) {
+      th.classList.add(playersState.sortDir === "asc" ? "sort-asc" : "sort-desc");
+    }
   }
 }
 
@@ -278,10 +541,49 @@ function setView(name) {
 
 for (const t of $tabs) t.addEventListener("click", () => setView(t.dataset.view));
 
+for (const b of $tagSeg) {
+  b.addEventListener("click", () => {
+    for (const x of $tagSeg) x.classList.toggle("active", x === b);
+    playersState.tag = b.dataset.tag;
+    playersState.expandedAddr = null;
+    userDetailCache.clear();
+    loadPlayers();
+  });
+}
+for (const b of $orderSeg) {
+  b.addEventListener("click", () => {
+    for (const x of $orderSeg) x.classList.toggle("active", x === b);
+    playersState.order = b.dataset.order;
+    playersState.expandedAddr = null;
+    loadPlayers();
+  });
+}
+
+for (const th of $tableHeaders) {
+  th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    if (playersState.sortKey === key) {
+      playersState.sortDir = playersState.sortDir === "asc" ? "desc" : "asc";
+    } else {
+      playersState.sortKey = key;
+      // sensible default direction: pnl/edge ASC for loss-mode, else DESC
+      playersState.sortDir = (key === "pnl" || key === "total_pnl" || key === "edge_per_dollar")
+        ? (playersState.order === "loss" ? "asc" : "desc")
+        : "desc";
+    }
+    updateSortIndicators();
+    renderPlayers();
+  });
+}
+
+let minTradesDebounce;
+$minTrades.addEventListener("input", () => {
+  clearTimeout(minTradesDebounce);
+  minTradesDebounce = setTimeout(renderPlayers, 150);
+});
+
 $search.addEventListener("input", updateMarkets);
 $sort.addEventListener("change", updateMarkets);
-$tagSel.addEventListener("change", loadPlayers);
-$orderSel.addEventListener("change", loadPlayers);
 $refresh.addEventListener("click", () => currentView === "markets" ? loadMarkets() : loadPlayers());
 
 loadMarkets();
