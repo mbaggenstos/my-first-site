@@ -33,18 +33,50 @@ function jsonResponse(body, init = {}) {
 // ─── Discovery queue: seed UFC/Tennis events of the last ~year ──────────────
 // Captures resolution state and winning outcome up-front so the scan loop
 // doesn't need extra Gamma round-trips.
-async function seedDiscoveryFromTag(env, tag) {
+async function seedDiscoveryFromTag(env, tag, opts = {}) {
   const now = Math.floor(Date.now() / 1000);
-  // pull recent events (closed + open). 200 covers ~1.5 years of UFC/Tennis.
-  const url = `${GAMMA_API}/events?tag_slug=${encodeURIComponent(tag)}&limit=200&order=startDate&ascending=false&closed=true`;
-  const url2 = `${GAMMA_API}/events?tag_slug=${encodeURIComponent(tag)}&limit=200&order=startDate&ascending=false&closed=false`;
-  const [r1, r2] = await Promise.all([
-    fetch(url, { cf: { cacheTtl: 3600 } }),
-    fetch(url2, { cf: { cacheTtl: 3600 } }),
-  ]);
-  const ev1 = r1.ok ? await r1.json() : [];
-  const ev2 = r2.ok ? await r2.json() : [];
-  const events = [...ev1, ...ev2];
+  const windowDays = Number(env.WINDOW_DAYS || 180);
+  const windowStartSec = now - windowDays * DAY;
+  // Gamma caps limit at 100. We paginate via offset, but each /events call
+  // counts toward the Workers 50-subrequest-per-invocation limit on the
+  // Free plan, so we cap pages per call and skip-by-startOffset for resume.
+  const maxPagesPerSide = Number(opts.maxPagesPerSide || 18); // 18*2 = 36 fetches max
+  const startOffset = Number(opts.startOffset || 0);
+  const closedOnly = opts.closedOnly === true;
+  const openOnly   = opts.openOnly === true;
+
+  async function pullSide(closed) {
+    const out = [];
+    let lastSeenOffset = startOffset;
+    for (let page = 0; page < maxPagesPerSide; page++) {
+      const offset = startOffset + page * 100;
+      const u = `${GAMMA_API}/events?tag_slug=${encodeURIComponent(tag)}` +
+        `&limit=100&offset=${offset}&order=startDate&ascending=false&closed=${closed}`;
+      let res;
+      try {
+        const r = await fetch(u, { cf: { cacheTtl: 1800 } });
+        if (!r.ok) break;
+        res = await r.json();
+      } catch { break; }
+      if (!Array.isArray(res) || res.length === 0) break;
+      let allOutOfWindow = true;
+      for (const e of res) {
+        const end = e.endDate ? Math.floor(new Date(e.endDate).getTime() / 1000) : null;
+        if (end == null || end >= windowStartSec) {
+          allOutOfWindow = false;
+          out.push(e);
+        }
+      }
+      lastSeenOffset = offset;
+      if (allOutOfWindow) break;
+      if (res.length < 100) break;
+    }
+    return { events: out, lastSeenOffset };
+  }
+
+  const closedPart = openOnly  ? { events: [], lastSeenOffset: startOffset } : await pullSide(true);
+  const openPart   = closedOnly ? { events: [], lastSeenOffset: startOffset } : await pullSide(false);
+  const events = [...closedPart.events, ...openPart.events];
 
   let added = 0;
   const dqStmts = [];
@@ -754,8 +786,14 @@ export default {
         if (url.pathname === "/api/admin/seed" && request.method === "POST") {
           const tag = url.searchParams.get("tag");
           if (!tag) return jsonResponse({ error: "tag param required" }, { status: 400 });
-          const n = await seedDiscoveryFromTag(env, tag);
-          return jsonResponse({ ok: true, seeded: n });
+          const opts = {
+            startOffset: Number(url.searchParams.get("offset") || 0),
+            maxPagesPerSide: Number(url.searchParams.get("pages") || 18),
+            closedOnly: url.searchParams.get("side") === "closed",
+            openOnly:   url.searchParams.get("side") === "open",
+          };
+          const n = await seedDiscoveryFromTag(env, tag, opts);
+          return jsonResponse({ ok: true, seeded: n, opts });
         }
         if (url.pathname === "/api/admin/scan" && request.method === "POST") {
           const r = await runScheduled(env, ctx);
