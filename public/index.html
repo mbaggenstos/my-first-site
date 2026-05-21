@@ -3,97 +3,70 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Polymarket Viewer</title>
+<title>Polymarket Players</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 <header class="topbar">
   <div class="brand">
     <span class="dot"></span>
-    <h1>Polymarket Viewer</h1>
+    <h1>Polymarket Players</h1>
   </div>
-  <nav class="tabs" role="tablist">
-    <button class="tab active" data-view="markets" role="tab">Markets</button>
-    <button class="tab" data-view="players" role="tab">Players</button>
-  </nav>
   <div class="controls">
-    <div class="controls-for-markets">
-      <label class="search">
-        <input id="search" type="search" placeholder="Märkte durchsuchen…" autocomplete="off" />
-      </label>
-      <select id="sort" aria-label="Sortierung">
-        <option value="volume">Volumen</option>
-        <option value="liquidity">Liquidität</option>
-        <option value="newest">Neueste</option>
-        <option value="ending">Endet bald</option>
-      </select>
+    <div class="seg" role="tablist" aria-label="Tag">
+      <button class="seg-btn active" data-tag="ufc">UFC</button>
+      <button class="seg-btn" data-tag="tennis">Tennis</button>
     </div>
-    <div class="controls-for-players" hidden>
-      <div class="seg" role="tablist" aria-label="Tag">
-        <button class="seg-btn active" data-tag="ufc">UFC</button>
-        <button class="seg-btn" data-tag="tennis">Tennis</button>
-      </div>
-      <div class="seg" role="tablist" aria-label="Order">
-        <button class="seg-btn active" data-order="loss">Verlierer</button>
-        <button class="seg-btn" data-order="profit">Gewinner</button>
-      </div>
-      <label class="minfilter">
-        <span>Min. Trades</span>
-        <input id="minTrades" type="number" min="0" value="0" step="10" />
-      </label>
+    <div class="seg" role="tablist" aria-label="Order">
+      <button class="seg-btn active" data-order="loss">Verlierer</button>
+      <button class="seg-btn" data-order="profit">Gewinner</button>
     </div>
+    <label class="minfilter">
+      <span>Min. Trades</span>
+      <input id="minTrades" type="number" min="0" value="0" step="10" />
+    </label>
     <button id="refresh" type="button" title="Neu laden" aria-label="Neu laden">↻</button>
   </div>
 </header>
 
 <main>
-  <section id="markets-view" class="view">
-    <section id="status" class="status" aria-live="polite">Lade Märkte…</section>
-    <section id="markets" class="grid" aria-busy="true"></section>
+  <section id="players-stats" class="stats-banner" aria-live="polite"></section>
+
+  <section class="tier-filter" id="tier-filter" aria-label="Tier-Filter">
+    <button class="chip active" data-tier="all">Alle</button>
+    <button class="chip" data-tier="whale">🐋 Whales</button>
+    <button class="chip" data-tier="big">🐬 Großfische</button>
+    <button class="chip" data-tier="fish">🐟 Fische</button>
+    <button class="chip" data-tier="perch">🐠 Barsche</button>
+    <button class="chip" data-tier="shrimp">🦐 Shrimps</button>
   </section>
 
-  <section id="players-view" class="view" hidden>
-    <section id="players-stats" class="stats-banner" aria-live="polite"></section>
-    <section id="players-status" class="status" aria-live="polite">Lade Players…</section>
-    <div class="table-wrap">
-      <table class="players-table" id="players-table">
-        <thead>
-          <tr>
-            <th class="col-rank">#</th>
-            <th class="col-player">Player</th>
-            <th class="num sortable" data-sort="pnl">P&L 180d <span class="arr"></span></th>
-            <th class="num sortable hide-sm" data-sort="unrealized_pnl">Unrealized <span class="arr"></span></th>
-            <th class="num sortable" data-sort="total_pnl">Total <span class="arr"></span></th>
-            <th class="num sortable hide-sm" data-sort="volume">Volume <span class="arr"></span></th>
-            <th class="num sortable hide-md" data-sort="trades">Trades <span class="arr"></span></th>
-            <th class="num sortable hide-md" data-sort="win_rate">Win-Rate <span class="arr"></span></th>
-            <th class="num sortable hide-md" data-sort="edge_per_dollar" title="Edge per Dollar — Skill-Metrik auf resolved Markets">Edge/$ <span class="arr"></span></th>
-          </tr>
-        </thead>
-        <tbody id="players-body"></tbody>
-      </table>
-    </div>
-  </section>
+  <section id="players-status" class="status" aria-live="polite">Lade Players…</section>
+
+  <div class="table-wrap">
+    <table class="players-table" id="players-table">
+      <thead>
+        <tr>
+          <th class="col-rank">#</th>
+          <th class="col-player">Player</th>
+          <th class="col-tier hide-sm">Tier</th>
+          <th class="num sortable" data-sort="pnl">P&L 180d <span class="arr"></span></th>
+          <th class="num sortable hide-sm" data-sort="unrealized_pnl">Unrealized <span class="arr"></span></th>
+          <th class="num sortable" data-sort="total_pnl">Total <span class="arr"></span></th>
+          <th class="num sortable hide-sm" data-sort="volume">Volume <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="trades">Trades <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="win_rate">Win-Rate <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="edge_per_dollar" title="Edge per Dollar — Skill-Metrik auf resolved Markets">Edge/$ <span class="arr"></span></th>
+        </tr>
+      </thead>
+      <tbody id="players-body"></tbody>
+    </table>
+  </div>
 </main>
 
 <footer>
   <p>Daten via <a href="https://gamma-api.polymarket.com" target="_blank" rel="noopener">Polymarket Gamma API</a> &amp; data-api. Keine Anlageberatung.</p>
 </footer>
-
-<template id="card-tpl">
-  <article class="card">
-    <header class="card-head">
-      <img class="thumb" alt="" loading="lazy" />
-      <h2 class="question"></h2>
-    </header>
-    <ul class="outcomes"></ul>
-    <footer class="meta">
-      <span class="vol"></span>
-      <span class="end"></span>
-    </footer>
-    <a class="open" target="_blank" rel="noopener">Auf Polymarket öffnen ↗</a>
-  </article>
-</template>
 
 <template id="stats-tpl">
   <div class="stat">
