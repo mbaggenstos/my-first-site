@@ -350,7 +350,7 @@ function renderDetail(rowData, detail, host) {
     const h = document.createElement("h4"); h.textContent = "Top markets (by |P&L|)";
     h.style.marginTop = "14px";
     wrap.append(h);
-    wrap.append(renderMarketsTable(tm, { showDate: false }));
+    wrap.append(renderMarketsTable(tm, { showDate: true }));
   }
   // recent markets sorted by most recent trade
   const rm = (detail.recent_markets || []).filter((m) => m.tag_slug === state.tag).slice(0, 10);
@@ -521,6 +521,8 @@ async function load() {
     state.sortDir = state.order === "loss" ? "asc" : "desc";
     updateSortIndicators();
     renderPlayers();
+    const stamp = document.getElementById("last-refresh");
+    if (stamp) stamp.textContent = new Date().toLocaleString();
   } catch (err) {
     $playersBody.replaceChildren();
     $playersStatus.innerHTML = "";
