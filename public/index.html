@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PolymarketFishWatch</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <h1>PolymarketFishWatch</h1>
+  </div>
+  <div class="controls">
+    <div class="seg" role="tablist" aria-label="Tag">
+      <button class="seg-btn active" data-tag="ufc">UFC</button>
+      <button class="seg-btn" data-tag="tennis">Tennis</button>
+    </div>
+    <div class="seg" role="tablist" aria-label="Order">
+      <button class="seg-btn active" data-order="loss">Losers</button>
+      <button class="seg-btn" data-order="profit">Winners</button>
+    </div>
+    <label class="minfilter">
+      <span>Min. trades</span>
+      <input id="minTrades" type="number" min="0" value="0" step="10" />
+    </label>
+    <button id="refresh" type="button" title="Reload" aria-label="Reload">↻</button>
+  </div>
+</header>
+
+<main>
+  <section id="players-stats" class="stats-banner" aria-live="polite"></section>
+
+  <section class="tier-filter" id="tier-filter" aria-label="Tier filter">
+    <button class="chip active" data-tier="all">All</button>
+    <button class="chip" data-tier="whale">🐋 Whales</button>
+    <button class="chip" data-tier="big">🐬 Big fish</button>
+    <button class="chip" data-tier="fish">🐟 Fish</button>
+    <button class="chip" data-tier="perch">🐠 Perch</button>
+    <button class="chip" data-tier="shrimp">🦐 Shrimps</button>
+  </section>
+
+  <section id="players-status" class="status" aria-live="polite">Loading players…</section>
+
+  <div class="table-wrap">
+    <table class="players-table" id="players-table">
+      <thead>
+        <tr>
+          <th class="col-rank">#</th>
+          <th class="col-player">Player</th>
+          <th class="col-tier hide-sm">Tier</th>
+          <th class="num sortable" data-sort="pnl">P&L 180d <span class="arr"></span></th>
+          <th class="num sortable hide-sm" data-sort="unrealized_pnl">Unrealized <span class="arr"></span></th>
+          <th class="num sortable" data-sort="total_pnl">Total <span class="arr"></span></th>
+          <th class="num sortable hide-sm" data-sort="volume">Volume <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="markets_played" title="Number of unique markets traded">Markets <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="trades">Trades <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="avg_trade_size" title="Volume / trades">Avg trade <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="largest_trade" title="Largest single trade">Largest <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="maker_ratio" title="Maker-side volume estimate — fills at clean-cent prices (heuristic, approximate)">Maker % <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="win_rate">Win rate <span class="arr"></span></th>
+          <th class="num sortable hide-md" data-sort="edge_per_dollar" title="Edge per dollar — skill metric on resolved markets">Edge/$ <span class="arr"></span></th>
+        </tr>
+      </thead>
+      <tbody id="players-body"></tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  <p>Data via <a href="https://gamma-api.polymarket.com" target="_blank" rel="noopener">Polymarket Gamma API</a> &amp; data-api. Not financial advice.</p>
+  <p class="copyright">Last refresh: <span id="last-refresh">—</span> &nbsp;·&nbsp; © <a href="https://macherweb.ch" target="_blank" rel="noopener">MacherWeb</a></p>
+</footer>
+
+<template id="stats-tpl">
+  <div class="stat">
+    <div class="stat-label"></div>
+    <div class="stat-value"></div>
+  </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>

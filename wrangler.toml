@@ -1,0 +1,31 @@
+name = "polymarket-viewer"
+main = "src/worker.js"
+compatibility_date = "2026-05-01"
+account_id = "933a3b1f8c6f27ff3f1af49b7519486a"
+
+[observability]
+enabled = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "polymarket"
+database_id = "9585920b-543a-49ad-891a-2dbe8aa35651"
+
+[triggers]
+crons = ["* * * * *"]
+
+routes = [
+  { pattern = "polymarket.macherweb.ch", custom_domain = true }
+]
+
+[vars]
+SYNC_BATCH_SIZE = "1"
+BOOTSTRAP_TOP_N = "500"
+WINDOW_DAYS = "180"
+DEFAULT_TAGS = "ufc,tennis"
+SUBREQUEST_BUDGET = "40"
