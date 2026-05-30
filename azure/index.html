@@ -14,6 +14,7 @@
   </div>
   <div class="controls">
     <span id="overall" class="pill">Lade…</span>
+    <span id="stamp" class="stamp"></span>
     <button id="refresh" type="button" title="Neu laden">↻</button>
   </div>
 </header>
@@ -21,29 +22,47 @@
 <main>
   <section id="status" class="status" aria-live="polite">Lade Status…</section>
   <div id="sections"></div>
+  <p class="hint">Tipp: Auf eine Kachel klicken zeigt Begründung &amp; Quellen.</p>
 </main>
 
 <footer>
   <p>
-    Cloud-Daten offiziell (Azure, AWS, Google, Cloudflare). CH-Telecom via
-    Crowd-Meldungen (störunglive.ch, inoffiziell). Strom = Link-Verweis ohne
-    Echtzeit-API. Auto-Refresh alle 60s.
+    Cloud offiziell (Azure-Feed, Cloudflare/Fortinet Statuspage). CH-Telecom &amp;
+    Microsoft 365 via Crowd-Meldungen (störunglive.ch, inoffiziell). Auto-Refresh 60s.
   </p>
 </footer>
 
-<template id="card-tpl">
-  <article class="card">
-    <header class="card-head">
-      <span class="state-dot"></span>
-      <h2 class="name"></h2>
-    </header>
-    <p class="detail"></p>
-    <footer class="meta">
-      <span class="note"></span>
-      <a class="open" target="_blank" rel="noopener">Quelle ↗</a>
-    </footer>
-  </article>
+<!-- Kachel -->
+<template id="tile-tpl">
+  <button class="tile" type="button">
+    <img class="tile-icon" alt="" loading="lazy" />
+    <span class="tile-body">
+      <span class="tile-name"></span>
+      <span class="tile-headline"></span>
+    </span>
+    <span class="state-dot"></span>
+  </button>
 </template>
+
+<!-- Detail-Overlay -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="m-name">
+    <button class="modal-close" type="button" data-close aria-label="Schliessen">✕</button>
+    <header class="modal-head">
+      <img id="m-icon" class="m-icon" alt="" />
+      <div>
+        <h2 id="m-name"></h2>
+        <span id="m-status" class="pill"></span>
+      </div>
+    </header>
+    <p id="m-reason" class="m-reason"></p>
+    <p id="m-method" class="m-method"></p>
+    <h3 class="m-srctitle">Quellen &amp; Belege</h3>
+    <ul id="m-sources" class="m-sources"></ul>
+    <p id="m-updated" class="m-updated"></p>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

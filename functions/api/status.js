@@ -1,19 +1,22 @@
-// Cloudflare Pages Function: aggregiert den Infrastruktur-Status mehrerer
-// Provider serverseitig (CORS-frei) und liefert ein normalisiertes JSON.
+// Cloudflare Pages Function: /api/status
+// Aggregiert den Infrastruktur-Status mehrerer Provider serverseitig (CORS-frei)
+// und liefert pro Service eine BEGRÜNDUNG samt klickbaren Quell-Links, damit im
+// Dashboard nachvollziehbar ist, warum ein Status zustande kommt.
 //
-// Route:  /api/status
-// Cache:  Edge-Cache 60s (s-maxage), damit wir die Quellen nicht hämmern.
-//
-// Jede Quelle läuft isoliert (Promise.allSettled + try/catch): Fällt eine aus,
-// erscheint sie als "unknown" — das Dashboard bleibt funktionsfähig.
+// Jede Quelle läuft isoliert (Promise.allSettled + try/catch): fällt eine aus,
+// erscheint sie als "unknown" – das Dashboard bleibt funktionsfähig.
 
 const TIMEOUT_MS = 8000;
 const UA = "MacherwebStatusBot/1.0 (+https://azure.macherweb.ch)";
 
-// Status-Stufen: operational < degraded < outage < unknown
+// Crowd-Schwellen (Nutzer-Meldungen / 24h)
+const CROWD_DEGRADED = 10; // ab hier "auffällig"
+const CROWD_OUTAGE = 40;   // ab hier "Störung wahrscheinlich"
+
+// Status-Stufen: operational < degraded < outage; unknown = keine Daten
 const RANK = { operational: 0, degraded: 1, outage: 2, unknown: -1 };
 
-async function fetchText(url, { headers = {}, as = "text" } = {}) {
+async function fetchText(url, headers = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -23,141 +26,157 @@ async function fetchText(url, { headers = {}, as = "text" } = {}) {
       headers: { "user-agent": UA, accept: "*/*", ...headers },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    if (as === "buffer") return await res.arrayBuffer();
     return await res.text();
   } finally {
     clearTimeout(t);
   }
 }
 
-function tile(over) {
+function tile(o) {
   return {
-    id: over.id,
-    name: over.name,
-    category: over.category,
-    status: over.status || "unknown",
-    detail: over.detail || "",
-    reports: over.reports ?? null,
-    source: over.source,
-    link: over.link || over.source,
-    note: over.note || "",
-    updated: over.updated || null,
+    id: o.id,
+    name: o.name,
+    category: o.category,
+    icon: o.icon || "",            // Domain für Favicon
+    status: o.status || "unknown",
+    headline: o.headline || "",     // kurze Kennzahl
+    reason: o.reason || "",         // warum dieser Status?
+    method: o.method || "",         // wie wird gemessen?
+    sources: o.sources || [],       // [{label, url, value}]
+    updated: o.updated || null,
   };
 }
 
-// --- Atlassian Statuspage (Cloudflare & viele andere teilen dieses Schema) ---
-async function statuspage({ id, name, category, base, link }) {
+// ---------------------------------------------------------------------------
+// Atlassian Statuspage (Cloudflare, Fortinet, … – gemeinsames Schema)
+// summary.json enthält Status + offene Incidents in einem Call.
+// ---------------------------------------------------------------------------
+async function statuspage({ id, name, category, base, icon }) {
   try {
-    const json = JSON.parse(await fetchText(`${base}/api/v2/status.json`));
-    const ind = json?.status?.indicator || "none";
-    const status =
-      ind === "none" ? "operational" : ind === "minor" ? "degraded" : "outage";
+    const j = JSON.parse(await fetchText(`${base}/api/v2/summary.json`));
+    const ind = j?.status?.indicator || "none";
+    const status = ind === "none" ? "operational" : ind === "minor" ? "degraded" : "outage";
+    const incidents = (j.incidents || []).filter((i) => i.status !== "resolved");
+
+    const sources = [
+      { label: "Offizielle Statusseite", url: base, value: j?.status?.description || "—" },
+    ];
+    for (const inc of incidents.slice(0, 6)) {
+      sources.push({ label: inc.name, url: inc.shortlink || base, value: `Impact: ${inc.impact}` });
+    }
+
     return tile({
-      id, name, category,
-      status,
-      detail: json?.status?.description || "",
-      source: base,
-      link: link || base,
-      updated: json?.page?.updated_at || null,
+      id, name, category, icon, status,
+      headline: incidents.length ? `${incidents.length} aktive Vorfälle` : "Alle Systeme normal",
+      reason: incidents.length
+        ? `Offizielle Statusseite meldet ${incidents.length} laufende(n) Vorfall/Vorfälle (Severity: ${ind}).`
+        : "Offizielle Statusseite meldet keinen aktiven Vorfall.",
+      method: "Offizielle Atlassian-Statuspage (api/v2/summary.json).",
+      sources,
+      updated: j?.page?.updated_at || null,
     });
   } catch (e) {
-    return tile({ id, name, category, status: "unknown", detail: String(e), source: base, link });
+    return tile({ id, name, category, icon, status: "unknown", reason: "Quelle nicht erreichbar: " + e,
+      sources: [{ label: "Statusseite", url: base, value: "manuell prüfen" }] });
   }
 }
 
-// --- Microsoft Azure (öffentlicher RSS-Feed, XML) ---
+// ---------------------------------------------------------------------------
+// Microsoft Azure – offizieller RSS-Feed (XML)
+// ---------------------------------------------------------------------------
 async function azure() {
-  const src = "https://azure.status.microsoft/en-us/status/feed/";
+  const page = "https://azure.status.microsoft/en-us/status";
+  const feed = "https://azure.status.microsoft/en-us/status/feed/";
   try {
-    const xml = await fetchText(src);
+    const xml = await fetchText(feed);
     const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => {
       const blk = m[1];
-      const pick = (tag) => (blk.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`)) || [, ""])[1]
+      const pick = (t) => (blk.match(new RegExp(`<${t}>([\\s\\S]*?)<\\/${t}>`)) || [, ""])[1]
         .replace(/<!\[CDATA\[|\]\]>/g, "").trim();
-      return { title: pick("title"), desc: pick("description"), pub: pick("pubDate") };
+      return { title: pick("title"), link: pick("link") || page, pub: pick("pubDate") };
     });
-    const blob = items.map((i) => `${i.title} ${i.desc}`).join(" ");
-    const swiss = /switzerland/i.test(blob);
-    let status = "operational";
-    if (items.length) status = swiss ? "outage" : "degraded";
-    const detail = items.length
-      ? items.slice(0, 4).map((i) => i.title).filter(Boolean).join("; ")
-      : "Keine aktiven Azure-Vorfälle";
+    const swiss = /switzerland/i.test(items.map((i) => i.title).join(" ") + " " + xml);
+    const status = items.length ? (swiss ? "outage" : "degraded") : "operational";
+
+    const sources = [
+      { label: "Azure Status (offiziell)", url: page,
+        value: items.length ? `${items.length} aktive Vorfälle` : "keine aktiven Vorfälle" },
+    ];
+    for (const it of items.slice(0, 6)) sources.push({ label: it.title, url: it.link, value: it.pub });
+
     return tile({
-      id: "azure", name: "Microsoft Azure", category: "Cloud",
-      status, reports: items.length, detail,
-      note: swiss ? "Schweiz-Region betroffen" : "",
-      source: src, link: "https://azure.status.microsoft/en-us/status",
+      id: "azure", name: "Microsoft Azure", category: "Cloud", icon: "azure.microsoft.com", status,
+      headline: items.length ? `${items.length} aktive Vorfälle` : "Keine aktiven Vorfälle",
+      reason: items.length
+        ? (swiss ? "Azure-Feed listet aktive Vorfälle MIT Schweiz-Bezug." : "Azure-Feed listet aktive Vorfälle (global, kein expliziter CH-Bezug).")
+        : "Azure-Statusfeed enthält aktuell keine aktiven Vorfälle.",
+      method: "Offizieller Azure-Status-RSS-Feed, gefiltert auf 'Switzerland'.",
+      sources,
     });
   } catch (e) {
-    return tile({ id: "azure", name: "Microsoft Azure", category: "Cloud", status: "unknown", detail: String(e), source: src, link: "https://azure.status.microsoft/en-us/status" });
+    return tile({ id: "azure", name: "Microsoft Azure", category: "Cloud", icon: "azure.microsoft.com",
+      status: "unknown", reason: "Feed nicht erreichbar: " + e,
+      sources: [{ label: "Azure Status", url: page, value: "manuell prüfen" }] });
   }
 }
 
-// --- CH Telecom via störunglive.ch (Crowd-Meldungen, inoffiziell) ---
-// Heuristik auf Basis der gemeldeten 24h-Nutzerberichte.
-const CROWD_DEGRADED = 10; // ab so vielen Meldungen: "auffällig"
-const CROWD_OUTAGE = 40;   // ab so vielen Meldungen: "Störung wahrscheinlich"
-
-async function crowd({ id, name, slug, official }) {
+// ---------------------------------------------------------------------------
+// Crowd-Daten via störunglive.ch (Nutzer-Meldungen der letzten 24h)
+// ---------------------------------------------------------------------------
+async function crowd({ id, name, category, slug, icon, official }) {
   const src = `https://www.xn--strunglive-fcb.ch/status/${slug}`;
   try {
     const html = await fetchText(src);
     const nums = [...html.matchAll(/(\d+)\s*Meldungen/g)].map((m) => Number(m[1]));
     const reports = nums.length ? Math.max(...nums) : 0;
-    let status = "operational";
-    if (reports >= CROWD_OUTAGE) status = "outage";
-    else if (reports >= CROWD_DEGRADED) status = "degraded";
+    const status = reports >= CROWD_OUTAGE ? "outage" : reports >= CROWD_DEGRADED ? "degraded" : "operational";
+
+    const sources = [
+      { label: "störunglive.ch – Crowd-Meldungen", url: src, value: `${reports} Nutzer-Meldungen / 24h` },
+    ];
+    if (official) sources.push({ label: "Offizielle Statusseite", url: official, value: "Anbieter-Seite" });
+
     return tile({
-      id, name, category: "CH Telecom",
-      status, reports,
-      detail: reports
-        ? `${reports} Nutzer-Meldungen in 24h`
-        : "Keine grösseren Störungen gemeldet",
-      note: "Crowd-Daten (inoffiziell)",
-      source: src, link: official || src,
+      id, name, category, icon, status,
+      headline: reports ? `${reports} Meldungen (24h)` : "Keine Meldungen",
+      reason: reports
+        ? `${reports} Nutzer-Meldungen in 24h. Schwellen: ab ${CROWD_DEGRADED} = auffällig, ab ${CROWD_OUTAGE} = Störung wahrscheinlich.`
+        : `Keine grösseren Störungen gemeldet (0 Nutzer-Meldungen). Schwelle für "auffällig": ${CROWD_DEGRADED}.`,
+      method: "Crowdsourcing: aggregierte Nutzer-Meldungen (inoffiziell, kein Provider-API).",
+      sources,
     });
   } catch (e) {
-    return tile({ id, name, category: "CH Telecom", status: "unknown", detail: String(e), note: "Crowd-Daten (inoffiziell)", source: src, link: official || src });
+    return tile({ id, name, category, icon, status: "unknown", reason: "Crowd-Quelle nicht erreichbar: " + e,
+      sources: [{ label: "störunglive.ch", url: src, value: "manuell prüfen" }] });
   }
 }
 
-// --- CH Strom & weitere: keine API -> reine Link-Kacheln ---
-const LINK_ONLY = [
-  { id: "ewz", name: "ewz (Strom Zürich)", category: "CH Strom", link: "https://www.ewz.ch/de/services/stoerungen.html" },
-  { id: "ekz", name: "EKZ (Strom Kanton ZH)", category: "CH Strom", link: "https://www.ekz.ch/" },
-  { id: "swissgrid", name: "Swissgrid (Übertragungsnetz)", category: "CH Strom", link: "https://www.swissgrid.ch/de/home/operation/grid-data/current-data.html" },
-  { id: "m365", name: "Microsoft 365", category: "Cloud", link: "https://status.cloud.microsoft/m365/" },
-];
-
 export async function onRequest() {
   const jobs = [
-    statuspage({ id: "cloudflare", name: "Cloudflare", category: "Cloud", base: "https://www.cloudflarestatus.com" }),
-    statuspage({ id: "fortinet", name: "Fortinet (FortiCloud)", category: "Cloud", base: "https://status.forticloud.com" }),
+    // CH Telecom (Crowd)
+    crowd({ id: "swisscom", name: "Swisscom", category: "CH Telecom", slug: "swisscom", icon: "swisscom.ch", official: "https://www.swisscom.ch/de/privatkunden/hilfe/netz-und-service-status.html" }),
+    crowd({ id: "sunrise", name: "Sunrise", category: "CH Telecom", slug: "sunrise", icon: "sunrise.ch", official: "https://www.sunrise.ch/de/support/aktuelle-stoerungen" }),
+    crowd({ id: "salt", name: "Salt", category: "CH Telecom", slug: "salt", icon: "salt.ch", official: "https://www.salt.ch/de/outages/status/" }),
+    crowd({ id: "init7", name: "Init7", category: "CH Telecom", slug: "init7", icon: "init7.net", official: "https://www.init7.net/de/support/faq/status-info/" }),
+
+    // Microsoft 365 (Crowd + offizielle Statusseite als Quelle)
+    crowd({ id: "m365", name: "Microsoft 365", category: "Microsoft 365", slug: "microsoft", icon: "microsoft.com", official: "https://status.cloud.microsoft/m365/" }),
+    crowd({ id: "teams", name: "Microsoft Teams", category: "Microsoft 365", slug: "microsoft-teams", icon: "microsoft.com", official: "https://status.cloud.microsoft/m365/" }),
+
+    // Cloud (offiziell)
     azure(),
-    crowd({ id: "swisscom", name: "Swisscom", slug: "swisscom", official: "https://www.swisscom.ch/de/privatkunden/hilfe/netz-und-service-status.html" }),
-    crowd({ id: "sunrise", name: "Sunrise", slug: "sunrise", official: "https://www.sunrise.ch/de/support/aktuelle-stoerungen" }),
-    crowd({ id: "salt", name: "Salt", slug: "salt", official: "https://www.salt.ch/de/outages/status/" }),
-    crowd({ id: "init7", name: "Init7", slug: "init7", official: "https://www.init7.net/de/support/faq/status-info/" }),
+    statuspage({ id: "cloudflare", name: "Cloudflare", category: "Cloud", base: "https://www.cloudflarestatus.com", icon: "cloudflare.com" }),
+    statuspage({ id: "fortinet", name: "Fortinet", category: "Cloud", base: "https://status.forticloud.com", icon: "fortinet.com" }),
   ];
 
   const settled = await Promise.allSettled(jobs);
-  const services = settled.map((s) => (s.status === "fulfilled" ? s.value : tile({ id: "err", name: "Quelle", category: "Cloud", status: "unknown", detail: String(s.reason) })));
+  const services = settled.map((s) =>
+    s.status === "fulfilled" ? s.value : tile({ id: "err", name: "Quelle", category: "Cloud", status: "unknown", reason: String(s.reason) })
+  );
 
-  for (const l of LINK_ONLY) {
-    services.push(tile({ ...l, status: "unknown", detail: "Keine Echtzeit-API – manuell prüfen", note: "nur Link" }));
-  }
+  const overall = services.reduce((acc, s) => (RANK[s.status] > RANK[acc] ? s.status : acc), "operational");
 
-  // Gesamtstatus = schlimmste bekannte Stufe
-  const worst = services.reduce((acc, s) => (RANK[s.status] > RANK[acc] ? s.status : acc), "operational");
-
-  const body = JSON.stringify({
-    generated: new Date().toISOString(),
-    overall: worst,
-    services,
-  });
-
-  return new Response(body, {
+  return new Response(JSON.stringify({ generated: new Date().toISOString(), overall, services }), {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "access-control-allow-origin": "*",
