@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CH Infrastruktur-Status</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span id="overall-dot" class="dot"></span>
+    <h1>CH Infrastruktur-Status</h1>
+  </div>
+  <div class="controls">
+    <span id="overall" class="pill">Lade…</span>
+    <button id="refresh" type="button" title="Neu laden">↻</button>
+  </div>
+</header>
+
+<main>
+  <section id="status" class="status" aria-live="polite">Lade Status…</section>
+  <div id="sections"></div>
+</main>
+
+<footer>
+  <p>
+    Cloud-Daten offiziell (Azure, AWS, Google, Cloudflare). CH-Telecom via
+    Crowd-Meldungen (störunglive.ch, inoffiziell). Strom = Link-Verweis ohne
+    Echtzeit-API. Auto-Refresh alle 60s.
+  </p>
+</footer>
+
+<template id="card-tpl">
+  <article class="card">
+    <header class="card-head">
+      <span class="state-dot"></span>
+      <h2 class="name"></h2>
+    </header>
+    <p class="detail"></p>
+    <footer class="meta">
+      <span class="note"></span>
+      <a class="open" target="_blank" rel="noopener">Quelle ↗</a>
+    </footer>
+  </article>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>
